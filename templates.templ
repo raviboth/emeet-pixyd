@@ -29,24 +29,7 @@ templ page(s webStatus) {
 				</header>
 				<div class="grid">
 					<div>
-						<div class="card">
-							<div class="card-title">Preview</div>
-							<div class="preview-container" id="preview">
-								if s.Online && s.Device != "" {
-									<div class="preview-live-dot"></div>
-									<img src="/api/stream" id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
-									<div id="preview-fallback" class="preview-placeholder" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column">
-										<div class="icon">&#x1F4F7;</div>
-										<div>Camera in use or unavailable</div>
-									</div>
-								} else {
-									<div class="preview-placeholder">
-										<div class="icon">&#x1F4F7;</div>
-										<div>Camera offline</div>
-									</div>
-								}
-							</div>
-						</div>
+						@previewSection(s)
 					</div>
 					@statusPanel(s)
 				</div>
@@ -58,6 +41,53 @@ templ page(s webStatus) {
 	</html>
 }
 
+templ previewSection(s webStatus) {
+	<div id="preview-section">
+		<div class="card">
+			<div class="card-title-row">
+				<div class="card-title">Preview</div>
+				if s.Online && s.Device != "" {
+					<button
+						class={ "btn btn-mini", templ.KV("btn-active", s.PreviewPaused) }
+						hx-post="/api/preview/toggle"
+						hx-target="#preview-section"
+						hx-swap="outerHTML"
+						aria-label="Toggle preview pause"
+					>
+						if s.PreviewPaused {
+							<svg class="btn-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2 L10 6 L3 10 Z" fill="currentColor"></path></svg>
+							<span>Resume</span>
+						} else {
+							<svg class="btn-icon" viewBox="0 0 12 12" aria-hidden="true"><rect x="3" y="2" width="2.5" height="8" fill="currentColor"></rect><rect x="6.5" y="2" width="2.5" height="8" fill="currentColor"></rect></svg>
+							<span>Pause</span>
+						}
+					</button>
+				}
+			</div>
+			<div class="preview-container" id="preview">
+				if s.Online && s.Device != "" && !s.PreviewPaused {
+					<div class="preview-live-dot"></div>
+					<img src="/api/stream" id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
+					<div id="preview-fallback" class="preview-placeholder" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column">
+						<div class="icon">&#x1F4F7;</div>
+						<div>Camera in use or unavailable</div>
+					</div>
+				} else if s.PreviewPaused {
+					<div class="preview-placeholder">
+						<div class="icon">&#x23F8;</div>
+						<div>Preview paused — device free for other apps</div>
+					</div>
+				} else {
+					<div class="preview-placeholder">
+						<div class="icon">&#x1F4F7;</div>
+						<div>Camera offline</div>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+}
+
 templ ptzSlider(label, axis string, min, max, value int, unit string) {
 	<div class="slider-row" id={ "ptz-" + axis }>
 		<span class="slider-label">{ label }</span>
@@ -65,6 +95,7 @@ templ ptzSlider(label, axis string, min, max, value int, unit string) {
 			type="range"
 			class="ptz-slider"
 			id={ "slider-" + axis }
+			name="value"
 			min={ fmt.Sprintf("%d", min) }
 			max={ fmt.Sprintf("%d", max) }
 			value={ fmt.Sprintf("%d", value) }
@@ -80,6 +111,39 @@ templ ptzSlider(label, axis string, min, max, value int, unit string) {
 templ ptzSliderWithToast(label, axis string, min, max, value int, unit string, toastMsg string, toastType string) {
 	@ptzSlider(label, axis, min, max, value, unit)
 	@toastOOB(toastMsg, toastType)
+}
+
+templ ptzPad() {
+	<div class="ptz-pad-wrap">
+		<div class="ptz-pad-axis ptz-pad-axis-top">tilt +</div>
+		<div class="ptz-pad-axis ptz-pad-axis-bottom">tilt -</div>
+		<div class="ptz-pad-axis ptz-pad-axis-left">pan -</div>
+		<div class="ptz-pad-axis ptz-pad-axis-right">pan +</div>
+		<svg class="ptz-pad" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="PTZ nudge pad">
+			<g class="ptz-pad-outer">
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="10" d="M 39 39 A 86 86 0 0 1 161 39 L 139 61 A 55 55 0 0 0 61 61 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="10" d="M 161 39 A 86 86 0 0 1 161 161 L 139 139 A 55 55 0 0 0 139 61 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="-10" d="M 161 161 A 86 86 0 0 1 39 161 L 61 139 A 55 55 0 0 0 139 139 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="-10" d="M 39 161 A 86 86 0 0 1 39 39 L 61 61 A 55 55 0 0 0 61 139 Z"></path>
+			</g>
+			<g class="ptz-pad-inner">
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="1" d="M 61 61 A 55 55 0 0 1 139 61 L 121 79 A 30 30 0 0 0 79 79 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="1" d="M 139 61 A 55 55 0 0 1 139 139 L 121 121 A 30 30 0 0 0 121 79 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="-1" d="M 139 139 A 55 55 0 0 1 61 139 L 79 121 A 30 30 0 0 0 121 121 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="-1" d="M 61 139 A 55 55 0 0 1 61 61 L 79 79 A 30 30 0 0 0 79 121 Z"></path>
+			</g>
+			<circle class="ptz-pad-home" data-action="center" cx="100" cy="100" r="30"></circle>
+			<text class="ptz-pad-label" x="100" y="32" text-anchor="middle">+10</text>
+			<text class="ptz-pad-label" x="100" y="58" text-anchor="middle">+1</text>
+			<text class="ptz-pad-label" x="100" y="151" text-anchor="middle">-1</text>
+			<text class="ptz-pad-label" x="100" y="177" text-anchor="middle">-10</text>
+			<text class="ptz-pad-label" x="172" y="104" text-anchor="middle">+10</text>
+			<text class="ptz-pad-label" x="146" y="104" text-anchor="middle">+1</text>
+			<text class="ptz-pad-label" x="54" y="104" text-anchor="middle">-1</text>
+			<text class="ptz-pad-label" x="28" y="104" text-anchor="middle">-10</text>
+			<path class="ptz-pad-home-icon" d="M 100 86 L 86 100 L 86 114 L 96 114 L 96 106 L 104 106 L 104 114 L 114 114 L 114 100 Z"></path>
+		</svg>
+	</div>
 }
 
 templ toastOOB(msg, toastType string) {
@@ -185,11 +249,15 @@ templ statusPanel(s webStatus) {
 		if s.Online {
 			<div class="card" style="margin-bottom:1rem">
 				<div class="card-title">PTZ</div>
-				@ptzSlider("Pan", "pan", -170, 170, s.Pan, "&#176;")
-				@ptzSlider("Tilt", "tilt", -30, 30, s.Tilt, "&#176;")
-				@ptzSlider("Zoom", "zoom", 100, 400, s.Zoom, "x")
+				@ptzSlider("Pan", "pan", -150, 150, s.Pan, "°")
+				@ptzSlider("Tilt", "tilt", -90, 90, s.Tilt, "°")
+				@ptzSlider("Zoom", "zoom", 100, 150, s.Zoom, "x")
+				@ptzPad()
 				<div class="spacer"></div>
-				<button class="btn" hx-post="/api/center" hx-target="#status-panel" aria-label="Center camera">Center<span class="kbd">C</span></button>
+				<div class="btn-group">
+					<button class="btn" hx-post="/api/center" hx-target="#status-panel" aria-label="Center camera">Center<span class="kbd">C</span></button>
+					<button class="btn" hx-post="/api/reset" hx-target="#status-panel" aria-label="Reset PTZ">Reset</button>
+				</div>
 			</div>
 		}
 		<div class="card">

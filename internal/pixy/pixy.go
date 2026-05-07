@@ -65,6 +65,10 @@ const (
 	StatePrivacy CameraState = "privacy"
 	// StateOffline means no PIXY device is detected.
 	StateOffline CameraState = "offline"
+	// StateActive is a HID-readback sentinel for firmware that does not
+	// distinguish idle vs tracking (response byte 0x03 covers both).
+	// Sync logic preserves the believed tracking/idle state when this is observed.
+	StateActive CameraState = "active"
 )
 
 func (s CameraState) String() string { return string(s) }
@@ -72,7 +76,7 @@ func (s CameraState) String() string { return string(s) }
 // Valid reports whether the camera state is one of the known values.
 func (s CameraState) Valid() bool {
 	switch s {
-	case StateIdle, StateTracking, StatePrivacy, StateOffline:
+	case StateIdle, StateTracking, StatePrivacy, StateOffline, StateActive:
 		return true
 	default:
 		return false

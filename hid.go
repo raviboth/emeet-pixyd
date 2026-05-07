@@ -23,6 +23,7 @@ const (
 	hidByteTracking = 0x01
 	hidBytePrivacy  = 0x02
 	hidByteIdle     = 0x00
+	hidByteActive   = 0x03
 	hidByteNC       = 0x01
 	hidByteLive     = 0x02
 	hidByteOriginal = 0x03
@@ -190,6 +191,8 @@ func parseHIDResponse(data []byte) hidResponse {
 			resp.Tracking = pixy.StateTracking
 		case hidBytePrivacy:
 			resp.Tracking = pixy.StatePrivacy
+		case hidByteActive:
+			resp.Tracking = pixy.StateActive
 		default:
 			resp.Tracking = pixy.StateIdle
 		}

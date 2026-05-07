@@ -4,15 +4,92 @@
   htmx.config.timeout = 10000;
   htmx.config.allowEval = false;
 
-  var pendingRequests = new Set();
+  var pendingRequests = new Map();
+  var abortedXhrs = new WeakSet();
   var consecutiveErrors = 0;
   var streamRetryDelay = 3000;
   var maxStreamRetryDelay = 30000;
+  var sliderInteracting = false;
+  var sliderInteractEndTimer = null;
+
+  function markSliderInteracting() {
+    sliderInteracting = true;
+    if (sliderInteractEndTimer) {
+      clearTimeout(sliderInteractEndTimer);
+      sliderInteractEndTimer = null;
+    }
+  }
+
+  function endSliderInteractingSoon() {
+    if (sliderInteractEndTimer) clearTimeout(sliderInteractEndTimer);
+    sliderInteractEndTimer = setTimeout(function () {
+      sliderInteracting = false;
+      sliderInteractEndTimer = null;
+    }, 800);
+  }
+
+  function isPtzSliderTarget(t) {
+    return t && t.classList && t.classList.contains("ptz-slider");
+  }
+
+  document.addEventListener("pointerdown", function (e) {
+    if (isPtzSliderTarget(e.target)) markSliderInteracting();
+  }, true);
+  document.addEventListener("pointerup", function (e) {
+    if (isPtzSliderTarget(e.target)) endSliderInteractingSoon();
+  }, true);
+  document.addEventListener("pointercancel", function (e) {
+    if (isPtzSliderTarget(e.target)) endSliderInteractingSoon();
+  }, true);
+  document.addEventListener("focusin", function (e) {
+    if (isPtzSliderTarget(e.target)) markSliderInteracting();
+  });
+  document.addEventListener("focusout", function (e) {
+    if (isPtzSliderTarget(e.target)) endSliderInteractingSoon();
+  });
 
   document.body.addEventListener("doAction", function (e) {
     htmx.ajax("POST", e.detail.url, {
       target: "#status-panel",
       swap: "outerHTML",
+    });
+  });
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-axis], [data-action]");
+    if (!t || !t.classList.contains("ptz-pad-wedge") && !t.classList.contains("ptz-pad-home")) return;
+    var action = t.getAttribute("data-action");
+    if (action === "center") {
+      htmx.ajax("POST", "/api/center", {
+        target: "#status-panel",
+        swap: "outerHTML",
+      });
+      return;
+    }
+    var axis = t.getAttribute("data-axis");
+    var delta = parseInt(t.getAttribute("data-delta"), 10);
+    if (!axis || isNaN(delta)) return;
+    var slider = document.getElementById("slider-" + axis);
+    if (!slider) return;
+    var current = parseInt(slider.value, 10) || 0;
+    var lo = parseInt(slider.min, 10);
+    var hi = parseInt(slider.max, 10);
+    var next = clamp(current + delta, lo, hi);
+    if (next === current) return;
+    slider.value = next;
+    var valEl = document.getElementById("val-" + axis);
+    if (valEl) {
+      var suffix = axis === "zoom" ? "x" : "°";
+      valEl.textContent = next + suffix;
+    }
+    htmx.ajax("POST", "/api/ptz/" + axis, {
+      target: "#ptz-" + axis,
+      swap: "outerHTML",
+      values: { value: String(next) },
     });
   });
 
@@ -52,27 +129,53 @@
     }, 2500);
   }
 
-  function showOfflineBanner() {
-    var panel = document.getElementById("status-panel");
-    if (!panel || panel.querySelector(".offline-banner")) return;
-    var banner = document.createElement("div");
-    banner.className = "error-banner offline-banner";
-    banner.innerHTML =
-      '<span class="offline-dot"></span> Daemon unreachable \u2014 reconnecting\u2026';
-    panel.insertBefore(banner, panel.firstChild);
+  function showStickyToast(id, msg, type) {
+    type = type || "error";
+    var container = document.getElementById("toast-container");
+    if (!container) return;
+    var existing = container.querySelector('[data-sticky="' + id + '"]');
+    if (existing) {
+      existing.textContent = msg;
+      return;
+    }
+    var el = document.createElement("div");
+    el.className = "toast toast-" + type + " show";
+    el.setAttribute("data-sticky", id);
+    el.textContent = msg;
+    container.appendChild(el);
+  }
+
+  function hideStickyToast(id) {
+    var container = document.getElementById("toast-container");
+    if (!container) return;
+    var el = container.querySelector('[data-sticky="' + id + '"]');
+    if (!el) return;
+    el.classList.remove("show");
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 300);
   }
 
   document.addEventListener("htmx:beforeRequest", function (e) {
     var path = e.detail.pathInfo && e.detail.pathInfo.requestPath;
     if (path === "/panel" && document.visibilityState !== "visible") {
+      abortedXhrs.add(e.detail.xhr);
+      e.detail.xhr.abort();
+      return;
+    }
+    if (path === "/panel" && sliderInteracting) {
+      abortedXhrs.add(e.detail.xhr);
       e.detail.xhr.abort();
       return;
     }
     if (path && pendingRequests.has(path)) {
-      e.detail.xhr.abort();
-      return;
+      var oldXhr = pendingRequests.get(path);
+      if (oldXhr) {
+        abortedXhrs.add(oldXhr);
+        try { oldXhr.abort(); } catch (_) {}
+      }
     }
-    if (path) pendingRequests.add(path);
+    if (path) pendingRequests.set(path, e.detail.xhr);
     if (path && path.indexOf("/api/ptz/") === 0) {
       var axis = path.split("/").pop();
       var slider = document.getElementById("slider-" + axis);
@@ -84,7 +187,9 @@
     var path = e.detail.pathInfo && e.detail.pathInfo.requestPath;
 
     if (path) {
-      pendingRequests.delete(path);
+      if (pendingRequests.get(path) === e.detail.xhr) {
+        pendingRequests.delete(path);
+      }
       if (path.indexOf("/api/ptz/") === 0) {
         var axis = path.split("/").pop();
         var slider = document.getElementById("slider-" + axis);
@@ -93,6 +198,12 @@
     }
 
     if (e.detail.failed) {
+      if (e.detail.xhr && abortedXhrs.has(e.detail.xhr)) {
+        return;
+      }
+      if (e.detail.xhr && e.detail.xhr.status === 0) {
+        return;
+      }
       consecutiveErrors++;
       if (path && path.indexOf("/api/ptz/") === 0) {
         var errAxis = path.split("/").pop();
@@ -107,18 +218,16 @@
         }
       }
       if (consecutiveErrors >= 3) {
-        showOfflineBanner();
+        showStickyToast("offline", "Daemon unreachable \u2014 reconnecting\u2026", "error");
+      } else {
+        showToast("Request failed", "error");
       }
-      showToast(
-        consecutiveErrors >= 3 ? "Connection lost \u2014 retrying" : "Request failed",
-        "error",
-      );
       return;
     }
 
     consecutiveErrors = 0;
-    var offlineBanner = document.querySelector(".offline-banner");
-    if (offlineBanner) offlineBanner.remove();
+    hideStickyToast("offline");
+    hideStickyToast("connection-error");
 
     if (path && path.indexOf("/api/ptz/") === 0) {
       var okAxis = path.split("/").pop();
@@ -128,12 +237,8 @@
   });
 
   document.addEventListener("htmx:responseError", function (e) {
-    var panel = document.getElementById("status-panel");
-    if (!panel || panel.querySelector(".error-banner:not(.offline-banner)")) return;
-    var banner = document.createElement("div");
-    banner.className = "error-banner";
-    banner.textContent = "Connection error \u2014 will retry automatically";
-    panel.insertBefore(banner, panel.firstChild);
+    if (e.detail && e.detail.xhr && abortedXhrs.has(e.detail.xhr)) return;
+    showStickyToast("connection-error", "Connection error \u2014 will retry automatically", "error");
   });
 
   document.addEventListener("htmx:timeout", function () {
@@ -174,6 +279,25 @@
     var img = document.getElementById("preview-img");
     if (!img) return;
     var retryTimer = null;
+
+    function reloadPreview(delay) {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      var fallback = document.getElementById("preview-fallback");
+      retryTimer = setTimeout(function () {
+        retryTimer = null;
+        img.src = "/api/stream?" + Date.now();
+        img.style.display = "";
+        if (fallback) fallback.style.display = "none";
+      }, delay);
+    }
+
+    img.addEventListener("load", function () {
+      streamRetryDelay = 3000;
+    });
+
     img.addEventListener("error", function () {
       if (retryTimer) return;
       this.style.display = "none";
@@ -183,14 +307,13 @@
         var label = fallback.querySelector("div:last-child");
         if (label) label.textContent = "Reconnecting\u2026";
       }
-      var delay = streamRetryDelay;
-      retryTimer = setTimeout(function () {
-        retryTimer = null;
-        img.src = "/api/stream?" + Date.now();
-        img.style.display = "";
-        if (fallback) fallback.style.display = "none";
-      }, delay);
+      reloadPreview(streamRetryDelay);
       streamRetryDelay = Math.min(streamRetryDelay * 2, maxStreamRetryDelay);
+    });
+
+    document.body.addEventListener("pixy:previewReset", function () {
+      streamRetryDelay = 3000;
+      reloadPreview(500);
     });
   })();
 })();

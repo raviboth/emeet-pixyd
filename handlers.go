@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 	"github.com/a-h/templ"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -22,12 +23,12 @@ const (
 	maxStreamBufferSize = 10 * 1024 * 1024
 	maxBodyBytes        = 1 << 10
 
-	panMin  = -170
-	panMax  = 170
-	tiltMin = -30
-	tiltMax = 30
+	panMin  = -150
+	panMax  = 150
+	tiltMin = -90
+	tiltMax = 90
 	zoomMin = 100
-	zoomMax = 400
+	zoomMax = 150
 
 	staticCacheMaxAge = 7 * 24 * time.Hour
 	ffmpegShutdown    = 2 * time.Second
@@ -43,6 +44,7 @@ const (
 	toastCameraIdle      = "Camera idle"
 	toastPrivacyOn       = "Privacy mode on"
 	toastCameraCentered  = "Camera centered"
+	toastCameraReset     = "Camera reset"
 	toastStateSynced     = "State synced"
 	toastProbedDevices   = "Probed devices"
 )
@@ -75,18 +77,19 @@ func (s *webServer) getWebStatus() webStatus {
 	defer s.daemon.mu.RUnlock()
 	//nolint:exhaustruct
 	status := webStatus{
-		Camera:     s.daemon.state.Camera,
-		Audio:      s.daemon.state.Audio,
-		Gesture:    s.daemon.state.Gesture,
-		Pan:        0,
-		Tilt:       0,
-		Zoom:       0,
-		InCall:     s.daemon.state.InCall,
-		Auto:       s.daemon.state.AutoMode,
-		Online:     s.daemon.videoDev != "",
-		Device:     s.daemon.videoDev,
-		LastSynced: formatLastSynced(s.daemon.lastSyncedAt),
-		Version:    buildVersion,
+		Camera:        s.daemon.state.Camera,
+		Audio:         s.daemon.state.Audio,
+		Gesture:       s.daemon.state.Gesture,
+		Pan:           0,
+		Tilt:          0,
+		Zoom:          0,
+		InCall:        s.daemon.state.InCall,
+		Auto:          s.daemon.state.AutoMode,
+		Online:        s.daemon.videoDev != "",
+		Device:        s.daemon.videoDev,
+		LastSynced:    formatLastSynced(s.daemon.lastSyncedAt),
+		Version:       buildVersion,
+		PreviewPaused: s.daemon.previewPaused,
 	}
 	if status.Online {
 		status.Zoom = zoomDefault
@@ -141,13 +144,25 @@ func (s *webServer) action(command string) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		request.Body = http.MaxBytesReader(responseWriter, request.Body, maxBodyBytes)
 
+		s.daemon.mu.RLock()
+		prevCamera := s.daemon.state.Camera
+		s.daemon.mu.RUnlock()
+
 		resp := s.daemon.handleCommand(request.Context(), command)
 
 		slog.Debug("web action", "cmd", command, "response", resp)
 
+		if command == cmdCenter || command == cmdReset {
+			s.invalidatePTZCache()
+		}
+
 		status := s.getWebStatusWithPTZ(request.Context())
 		toast, _ := actionToast(command)
 		applyResponseToStatus(resp, &status, toast)
+
+		if prevCamera != status.Camera && (prevCamera == pixy.StatePrivacy || status.Camera == pixy.StatePrivacy) {
+			responseWriter.Header().Set("HX-Trigger", "pixy:previewReset")
+		}
 
 		templ.Handler(statusPanel(status)).ServeHTTP(responseWriter, request) //nolint:contextcheck
 	}
@@ -163,6 +178,8 @@ func actionToast(command string) (string, string) {
 		return toastPrivacyOn, toastTypeSuccess
 	case cmdCenter:
 		return toastCameraCentered, toastTypeSuccess
+	case cmdReset:
+		return toastCameraReset, toastTypeSuccess
 	case cmdSync:
 		return toastStateSynced, toastTypeSuccess
 	case cmdProbe:
@@ -305,7 +322,42 @@ func (s *webServer) checkDevice(responseWriter http.ResponseWriter) (webStatus, 
 
 		return status, false
 	}
+	if status.Camera == pixy.StatePrivacy {
+
+		http.Error(responseWriter, "privacy mode", http.StatusServiceUnavailable)
+
+		return status, false
+	}
+	if status.PreviewPaused {
+
+		http.Error(responseWriter, "preview paused", http.StatusServiceUnavailable)
+
+		return status, false
+	}
 	return status, true
+}
+
+func (s *webServer) handlePreviewToggle(responseWriter http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(responseWriter, request.Body, maxBodyBytes)
+
+	s.daemon.mu.Lock()
+	s.daemon.previewPaused = !s.daemon.previewPaused
+	paused := s.daemon.previewPaused
+	s.daemon.mu.Unlock()
+
+	if paused {
+		s.daemon.streamMu.Lock()
+		if s.daemon.streamCancel != nil {
+			s.daemon.streamCancel()
+			s.daemon.streamCancel = nil
+		}
+		s.daemon.streamMu.Unlock()
+	} else {
+		responseWriter.Header().Set("HX-Trigger", "pixy:previewReset")
+	}
+
+	status := s.getWebStatus()
+	templ.Handler(previewSection(status)).ServeHTTP(responseWriter, request)
 }
 
 func (s *webServer) handleGestureToggle(responseWriter http.ResponseWriter, request *http.Request) {
@@ -339,6 +391,8 @@ func newWebMux(server *webServer) *http.ServeMux {
 	mux.HandleFunc("POST /api/gesture", server.handleGestureToggle)
 	mux.HandleFunc("POST /api/auto", server.handleAutoToggle)
 	mux.HandleFunc("POST /api/center", server.action("center"))
+	mux.HandleFunc("POST /api/reset", server.action("reset"))
+	mux.HandleFunc("POST /api/preview/toggle", server.handlePreviewToggle)
 	mux.HandleFunc("POST /api/sync", server.action("sync"))
 	mux.HandleFunc("POST /api/probe", server.action("probe"))
 	mux.HandleFunc("POST /api/ptz/{axis}", server.handlePTZ)
