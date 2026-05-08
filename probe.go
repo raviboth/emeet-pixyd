@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,29 @@ func isPixyName(name string) bool {
 	return strings.Contains(name, "EMEET") ||
 		strings.Contains(name, "Pixy") ||
 		strings.Contains(name, "PIXY")
+}
+
+func readUSBVendorProduct(devicePath string) (vendor, product string) {
+	if v, err := os.ReadFile(filepath.Join(devicePath, "id", "vendor")); err == nil {
+		if p, perr := os.ReadFile(filepath.Join(devicePath, "id", "product")); perr == nil {
+			return strings.TrimSpace(string(v)), strings.TrimSpace(string(p))
+		}
+	}
+
+	for cur := filepath.Clean(devicePath); ; {
+		v, vErr := os.ReadFile(filepath.Join(cur, "idVendor"))
+		p, pErr := os.ReadFile(filepath.Join(cur, "idProduct"))
+		if vErr == nil && pErr == nil {
+			return strings.TrimSpace(string(v)), strings.TrimSpace(string(p))
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+
+	return "", ""
 }
 
 func probeVideo4linux(sysfsPath string) string {
@@ -40,21 +64,7 @@ func probeVideo4linux(sysfsPath string) string {
 			continue
 		}
 
-		vendorFile := fmt.Sprintf("%s/%s/device/id/vendor", sysfsPath, name)
-		productFile := fmt.Sprintf("%s/%s/device/id/product", sysfsPath, name)
-
-		vendorData, vErr := os.ReadFile(vendorFile)
-		if vErr != nil {
-			continue
-		}
-
-		productData, pErr := os.ReadFile(productFile)
-		if pErr != nil {
-			continue
-		}
-
-		vendor := strings.TrimSpace(string(vendorData))
-		product := strings.TrimSpace(string(productData))
+		vendor, product := readUSBVendorProduct(filepath.Join(sysfsPath, name, "device"))
 
 		if vendor == pixyVendorID && product == pixyProductID {
 			return videoPath
