@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -87,6 +88,13 @@ func (d *Daemon) autoManage(ctx context.Context) {
 	}
 
 	if autoMode.IsOff() {
+		return
+	}
+
+	d.mu.RLock()
+	suppressedUntil := d.autoSuppressedUntil
+	d.mu.RUnlock()
+	if time.Now().Before(suppressedUntil) {
 		return
 	}
 

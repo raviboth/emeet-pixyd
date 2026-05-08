@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -53,6 +55,13 @@ type Daemon struct {
 
 	events *events.Broadcaster
 
+	streamMu     sync.Mutex
+	streamCancel context.CancelFunc
+
+	autoSuppressedUntil time.Time
+
+	previewPaused bool
+
 	isCameraInUseFn func(videoDev string) bool
 	findSourceFn    func(ctx context.Context) (string, error)
 	setSourceFn     func(ctx context.Context, sourceID string)
@@ -62,6 +71,7 @@ type Daemon struct {
 	setAudioFn     func(ctx context.Context, mode pixy.AudioMode) error
 	setGestureFn   func(ctx context.Context, enabled bool) error
 	centerCameraFn func(ctx context.Context) error
+	resetCameraFn  func(ctx context.Context) error
 	v4l2SetFn      func(ctx context.Context, dev, ctrl, val string) error
 }
 
@@ -88,6 +98,7 @@ func NewDaemon(cfg pixy.Config) (*Daemon, error) {
 	d.setAudioFn = d.setAudio
 	d.setGestureFn = d.setGesture
 	d.centerCameraFn = d.centerCamera
+	d.resetCameraFn = d.resetCamera
 	d.v4l2SetFn = v4l2Set
 	d.state.AutoMode = cfg.AutoMode
 	d.state.Audio = cfg.DefaultAudio
@@ -201,13 +212,47 @@ func (d *Daemon) setDeviceState(
 	return nil
 }
 
+func (d *Daemon) resetStream() {
+	d.streamMu.Lock()
+	cancel := d.streamCancel
+	d.streamCancel = nil
+	d.streamMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (d *Daemon) setTracking(ctx context.Context, mode pixy.CameraState) error {
-	return d.setDeviceState(
+	d.mu.RLock()
+	prev := d.state.Camera
+	d.mu.RUnlock()
+
+	pcs := make([]uintptr, 8)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	caller := "?"
+	for {
+		f, more := frames.Next()
+		if !strings.Contains(f.File, "runtime/") {
+			caller = fmt.Sprintf("%s:%d", filepath.Base(f.File), f.Line)
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	slog.Info("setTracking", "prev", prev, "next", mode, "caller", caller)
+
+	err := d.setDeviceState(
 		ctx,
 		pixyConfig(hidInterfaceTracking, cameraHIDByte(mode)),
 		pixyCommit(hidInterfaceTracking),
 		func(d *Daemon) { d.state.Camera = mode },
 	)
+	if err == nil && (mode == pixy.StatePrivacy || prev == pixy.StatePrivacy) {
+		d.resetStream()
+	}
+	return err
 }
 
 func (d *Daemon) setAudio(ctx context.Context, mode pixy.AudioMode) error {
@@ -245,13 +290,33 @@ func (d *Daemon) centerCamera(ctx context.Context) error {
 	err := v4l2SetMultiple(ctx, videoDev, map[string]string{
 		"pan_absolute":  "0",
 		"tilt_absolute": "0",
-		"zoom_absolute": "100",
 	})
 	if err != nil {
 		return fmt.Errorf("centerCamera: %w", err)
 	}
 
 	d.publishPTZ()
+	return nil
+}
+
+func (d *Daemon) resetCamera(ctx context.Context) error {
+	d.mu.RLock()
+	videoDev := d.videoDev
+	d.mu.RUnlock()
+
+	if videoDev == "" {
+		return fmt.Errorf("resetCamera: %w", pixy.ErrPIXYNotConnected)
+	}
+
+	err := v4l2SetMultiple(ctx, videoDev, map[string]string{
+		"pan_absolute":  "0",
+		"tilt_absolute": "0",
+		"zoom_absolute": "100",
+	})
+	if err != nil {
+		return fmt.Errorf("resetCamera: %w", err)
+	}
+
 	return nil
 }
 
@@ -317,9 +382,17 @@ func (d *Daemon) syncState(ctx context.Context) string {
 	changed := false
 
 	if trackingErr == nil && tracking.Valid() && tracking != pixy.StateOffline {
-		if d.state.Camera != tracking {
-			slog.Info("state sync: camera changed", "believed", d.state.Camera, "actual", tracking)
-			d.state.Camera = tracking
+		resolved := tracking
+		if tracking == pixy.StateActive {
+			if d.state.Camera == pixy.StateTracking || d.state.Camera == pixy.StateIdle {
+				resolved = d.state.Camera
+			} else {
+				resolved = pixy.StateIdle
+			}
+		}
+		if d.state.Camera != resolved {
+			slog.Info("state sync: camera changed", "believed", d.state.Camera, "actual", resolved, "raw", tracking)
+			d.state.Camera = resolved
 			changed = true
 		}
 	} else if trackingErr != nil {

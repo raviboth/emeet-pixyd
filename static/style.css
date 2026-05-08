@@ -122,6 +122,34 @@ header h1 {
   font-weight: 600;
 }
 
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.card-title-row .card-title {
+  margin-bottom: 0;
+}
+
+.btn-mini {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  line-height: 1;
+}
+
+.btn-icon {
+  width: 0.8em;
+  height: 0.8em;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 .state-indicator {
   display: flex;
   align-items: center;
@@ -306,7 +334,7 @@ header h1 {
 .preview-live-dot::after {
   content: "LIVE";
   position: absolute;
-  left: 14px;
+  right: 14px;
   top: -2px;
   font-size: 0.55rem;
   font-weight: 700;
@@ -675,6 +703,101 @@ button.htmx-request {
   border: 1px dashed var(--border-subtle);
   box-shadow: none;
   backdrop-filter: none;
+}
+
+.ptz-pad-wrap {
+  position: relative;
+  width: 220px;
+  margin: 1rem auto 0.5rem;
+}
+
+.ptz-pad {
+  width: 220px;
+  height: 220px;
+  display: block;
+  user-select: none;
+}
+
+.ptz-pad-wedge {
+  fill: var(--surface2);
+  stroke: var(--border);
+  stroke-width: 1;
+  cursor: pointer;
+  transition: fill var(--transition), stroke var(--transition);
+}
+
+.ptz-pad-wedge:hover {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.ptz-pad-wedge:active {
+  fill: var(--text-bright);
+  stroke: var(--text-bright);
+}
+
+.ptz-pad-home {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+  cursor: pointer;
+  transition: fill var(--transition), stroke var(--transition);
+}
+
+.ptz-pad-home:hover {
+  fill: var(--green);
+  stroke: var(--green);
+}
+
+.ptz-pad-home:active {
+  fill: var(--text-bright);
+  stroke: var(--text-bright);
+}
+
+.ptz-pad-home-icon {
+  fill: var(--green);
+  pointer-events: none;
+}
+
+.ptz-pad-label {
+  fill: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+  dominant-baseline: middle;
+}
+
+.ptz-pad-axis {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+.ptz-pad-axis-top {
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ptz-pad-axis-bottom {
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ptz-pad-axis-left {
+  left: -8px;
+  top: 50%;
+  transform: translate(-100%, -50%);
+}
+
+.ptz-pad-axis-right {
+  right: -8px;
+  top: 50%;
+  transform: translate(100%, -50%);
 }
 
 @media (prefers-reduced-motion: reduce) {

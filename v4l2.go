@@ -75,7 +75,7 @@ func parsePTZValues(ctx context.Context, dev string) ptzValues {
 
 		switch strings.TrimSpace(key) {
 		case "pan_absolute":
-			ptz.Pan = v / v4l2DegreesPerUnit
+			ptz.Pan = -v / v4l2DegreesPerUnit
 		case "tilt_absolute":
 			ptz.Tilt = v / v4l2DegreesPerUnit
 		case "zoom_absolute":

@@ -35,6 +35,9 @@ func ffmpegStreamCmd(ctx context.Context, device string) *exec.Cmd {
 		"ffmpeg",
 		"-f", "v4l2",
 		"-input_format", "mjpeg",
+		"-video_size", "1920x1080",
+		"-framerate", "30",
+		"-thread_queue_size", "32",
 		"-i", device,
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
@@ -87,9 +90,20 @@ func (s *webServer) handleStream(
 	}
 	rc := http.NewResponseController(responseWriter)
 	if dlErr := rc.SetWriteDeadline(time.Time{}); dlErr != nil {
-		slog.Warn("could not clear write deadline; stream may be cut off by server timeout", "error", dlErr)
+		slog.Debug("clear write deadline", "error", dlErr)
 	}
-	ctx := request.Context()
+	ctx, cancel := context.WithCancel(request.Context())
+	s.daemon.streamMu.Lock()
+	s.daemon.streamCancel = cancel
+	s.daemon.streamMu.Unlock()
+	defer func() {
+		s.daemon.streamMu.Lock()
+		if s.daemon.streamCancel != nil {
+			s.daemon.streamCancel = nil
+		}
+		s.daemon.streamMu.Unlock()
+		cancel()
+	}()
 	cmd := ffmpegStreamCmd(ctx, status.Device)
 	stdOut, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
@@ -97,17 +111,12 @@ func (s *webServer) handleStream(
 
 		return
 	}
-	stdErr, stdErrErr := cmd.StderrPipe()
-	if stdErrErr != nil {
-		slog.Debug("ffmpeg stderr pipe error", "error", stdErrErr)
-	} else if stdErr != nil {
+	stdErr, _ := cmd.StderrPipe()
+	if stdErr != nil {
 		go func() {
 			scanner := bufio.NewScanner(stdErr)
 			for scanner.Scan() {
 				slog.Debug("ffmpeg", "line", scanner.Text())
-			}
-			if scanErr := scanner.Err(); scanErr != nil {
-				slog.Debug("ffmpeg stderr scan error", "error", scanErr)
 			}
 		}()
 	}

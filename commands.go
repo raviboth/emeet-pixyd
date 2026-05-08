@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -29,6 +30,7 @@ const (
 	cmdTrack         = "track"
 	cmdAudio         = "audio"
 	cmdCenter        = "center"
+	cmdReset         = "reset"
 	cmdAuto          = "auto"
 	cmdSync          = "sync"
 	cmdProbe         = "probe"
@@ -77,6 +79,9 @@ func (d *Daemon) handleCommand(ctx context.Context, cmd string) string {
 	case cmdCenter:
 		return d.handleCenterCommand(ctx)
 
+	case cmdReset:
+		return d.handleResetCommand(ctx)
+
 	case cmdAutoOn, cmdAutoOff, cmdToggleAuto, cmdAuto:
 		return d.handleAutoCommand(parts)
 
@@ -123,6 +128,25 @@ func (d *Daemon) handleTrackingCommand(
 	state pixy.CameraState,
 	label string,
 ) string {
+	d.mu.Lock()
+	current := d.state.Camera
+	d.autoSuppressedUntil = time.Now().Add(15 * time.Second)
+	d.mu.Unlock()
+
+	if current == pixy.StatePrivacy && (state == pixy.StateTracking || state == pixy.StateIdle) {
+		if err := d.setTrackingFn(ctx, pixy.StateIdle); err != nil {
+			return (&CommandError{Op: label + " " + string(pixy.StateIdle), Err: err}).Error()
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(150 * time.Millisecond)
+			if observed, qErr := d.queryTracking(ctx); qErr == nil && observed != pixy.StatePrivacy {
+				break
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
 	if err := d.setTrackingFn(ctx, state); err != nil {
 		return (&CommandError{Op: label + " " + string(state), Err: err}).Error()
 	}
@@ -190,6 +214,14 @@ func (d *Daemon) handleCenterCommand(ctx context.Context) string {
 	}
 
 	return "centered"
+}
+
+func (d *Daemon) handleResetCommand(ctx context.Context) string {
+	if err := d.resetCameraFn(ctx); err != nil {
+		return (&CommandError{Op: "reset", Err: err}).Error()
+	}
+
+	return "reset"
 }
 
 func (d *Daemon) handleAutoCommand(parts []string) string {
@@ -260,6 +292,11 @@ func (d *Daemon) handlePTZCommand(ctx context.Context, parts []string) string {
 		multiplier = 1
 	}
 
+	hwVal := val * multiplier
+	if axis == axisPan {
+		hwVal = -hwVal
+	}
+
 	d.mu.RLock()
 	videoDev := d.videoDev
 	d.mu.RUnlock()
@@ -272,7 +309,7 @@ func (d *Daemon) handlePTZCommand(ctx context.Context, parts []string) string {
 		ctx,
 		videoDev,
 		axis+"_absolute",
-		strconv.Itoa(val*multiplier),
+		strconv.Itoa(hwVal),
 	); v4l2Err != nil {
 		return (&CommandError{Op: axis, Err: v4l2Err}).Error()
 	}
