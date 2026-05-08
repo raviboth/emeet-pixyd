@@ -236,6 +236,20 @@
     }
   });
 
+  document.addEventListener("htmx:afterSwap", function (e) {
+    if (!e.detail || !e.detail.target) return;
+    if (e.detail.target.id !== "preview-section") return;
+    var img = document.getElementById("preview-img");
+    if (img) {
+      // Force the browser to actually issue the request even if the URL string
+      // looks identical to a previously-failed one. Setting src to itself with
+      // an updated cache-bust kicks off a new fetch.
+      var url = img.getAttribute("src") || "/api/stream";
+      var sep = url.indexOf("?") >= 0 ? "&" : "?";
+      img.src = url + sep + "_=" + Date.now();
+    }
+  });
+
   document.addEventListener("htmx:responseError", function (e) {
     if (e.detail && e.detail.xhr && abortedXhrs.has(e.detail.xhr)) return;
     showStickyToast("connection-error", "Connection error \u2014 will retry automatically", "error");
@@ -286,8 +300,14 @@
       if (refreshDebounceTimer) return;
       refreshDebounceTimer = setTimeout(function () {
         refreshDebounceTimer = null;
-        if (document.visibilityState === "visible") {
-          htmx.trigger(document.body, "refresh");
+        if (document.visibilityState !== "visible") return;
+        htmx.trigger(document.body, "refresh");
+        var preview = document.getElementById("preview-section");
+        if (preview) {
+          htmx.ajax("GET", "/preview", {
+            target: "#preview-section",
+            swap: "outerHTML",
+          });
         }
       }, 50);
     }
@@ -298,7 +318,20 @@
       } catch (err) {
         return;
       }
-      es.addEventListener("state", scheduleRefresh);
+      es.addEventListener("state", function (e) {
+        scheduleRefresh();
+        try {
+          var data = JSON.parse(e.data);
+          // When camera leaves privacy mode, nudge preview to reload via the
+          // existing pixy:previewReset path. The /panel refetch is async; the
+          // event-driven nudge avoids waiting for it.
+          if (data && data.camera && data.camera !== "privacy") {
+            htmx.trigger(document.body, "pixy:previewReset");
+          }
+        } catch (err) {
+          /* ignore parse errors */
+        }
+      });
       es.addEventListener("ptz", scheduleRefresh);
       es.addEventListener("online", scheduleRefresh);
       es.onopen = function () {
@@ -321,14 +354,29 @@
     if (!img) return;
     var retryTimer = null;
 
+    function streamShouldBeBlocked() {
+      // Camera state and pause state both render into the status panel; reading
+      // the DOM avoids extra requests. If the state indicator says "privacy" or
+      // the preview section has the paused placeholder, the server will reject
+      // /api/stream with 503, so don't bother retrying \u2014 the SSE state event
+      // will fire pixy:previewReset / refresh once the gate lifts.
+      var stateEl = document.querySelector(".state-indicator");
+      if (stateEl && stateEl.classList.contains("state-privacy")) return true;
+      var fallback = document.getElementById("preview-fallback");
+      if (fallback && fallback.dataset.reason === "paused") return true;
+      return false;
+    }
+
     function reloadPreview(delay) {
       if (retryTimer) {
         clearTimeout(retryTimer);
         retryTimer = null;
       }
+      if (streamShouldBeBlocked()) return;
       var fallback = document.getElementById("preview-fallback");
       retryTimer = setTimeout(function () {
         retryTimer = null;
+        if (streamShouldBeBlocked()) return;
         img.src = "/api/stream?" + Date.now();
         img.style.display = "";
         if (fallback) fallback.style.display = "none";
@@ -346,8 +394,15 @@
       if (fallback) {
         fallback.style.display = "flex";
         var label = fallback.querySelector("div:last-child");
-        if (label) label.textContent = "Reconnecting\u2026";
+        if (label) {
+          if (streamShouldBeBlocked()) {
+            label.textContent = "Preview blocked (privacy or paused)";
+          } else {
+            label.textContent = "Reconnecting\u2026";
+          }
+        }
       }
+      if (streamShouldBeBlocked()) return;
       reloadPreview(streamRetryDelay);
       streamRetryDelay = Math.min(streamRetryDelay * 2, maxStreamRetryDelay);
     });

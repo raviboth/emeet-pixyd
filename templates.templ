@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -42,7 +43,7 @@ templ page(s webStatus) {
 }
 
 templ previewSection(s webStatus) {
-	<div id="preview-section">
+	<div id="preview-section" hx-get="/preview" hx-trigger="refresh from:body" hx-swap="outerHTML">
 		<div class="card">
 			<div class="card-title-row">
 				<div class="card-title">Preview</div>
@@ -65,15 +66,20 @@ templ previewSection(s webStatus) {
 				}
 			</div>
 			<div class="preview-container" id="preview">
-				if s.Online && s.Device != "" && !s.PreviewPaused {
+				if s.Online && s.Device != "" && !s.PreviewPaused && s.Camera != pixy.StatePrivacy {
 					<div class="preview-live-dot"></div>
-					<img src="/api/stream" id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
+					<img src={ fmt.Sprintf("/api/stream?t=%d", time.Now().UnixNano()) } id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
 					<div id="preview-fallback" class="preview-placeholder" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column">
 						<div class="icon">&#x1F4F7;</div>
 						<div>Camera in use or unavailable</div>
 					</div>
+				} else if s.Camera == pixy.StatePrivacy {
+					<div class="preview-placeholder" data-reason="privacy">
+						<div class="icon">&#x1F576;</div>
+						<div>Privacy mode — lens covered</div>
+					</div>
 				} else if s.PreviewPaused {
-					<div class="preview-placeholder">
+					<div id="preview-fallback" class="preview-placeholder" data-reason="paused">
 						<div class="icon">&#x23F8;</div>
 						<div>Preview paused — device free for other apps</div>
 					</div>

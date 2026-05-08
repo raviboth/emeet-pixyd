@@ -222,6 +222,11 @@ func (s *webServer) handleEvents(responseWriter http.ResponseWriter, request *ht
 	}
 }
 
+func (s *webServer) handlePreviewSection(responseWriter http.ResponseWriter, request *http.Request) {
+	status := s.getWebStatus()
+	templ.Handler(previewSection(status)).ServeHTTP(responseWriter, request)
+}
+
 func (s *webServer) handleStatusPanel(responseWriter http.ResponseWriter, request *http.Request) {
 	status := s.getWebStatusWithPTZ(request.Context())
 	templ.Handler(statusPanel(status)).ServeHTTP(responseWriter, request) //nolint:contextcheck
@@ -470,6 +475,7 @@ func newWebMux(server *webServer) *http.ServeMux {
 	mux.Handle("GET /static/", cachingFS{handler: http.FileServer(http.FS(staticFS))})
 	mux.HandleFunc("GET /{$}", server.handleIndex)
 	mux.HandleFunc("GET /panel", server.handleStatusPanel)
+	mux.HandleFunc("GET /preview", server.handlePreviewSection)
 	mux.HandleFunc("POST /api/track", server.action("track"))
 	mux.HandleFunc("POST /api/"+cmdIdle, server.action(cmdIdle))
 	mux.HandleFunc("POST /api/privacy", server.action(cmdPrivacy))
