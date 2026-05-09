@@ -1,0 +1,14 @@
+[Unit]
+Description=EMEET PIXY Tray Indicator
+After=graphical-session.target emeet-pixyd.service
+Wants=emeet-pixyd.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/emeet-pixy-tray
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
