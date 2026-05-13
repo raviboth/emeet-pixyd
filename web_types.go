@@ -11,6 +11,12 @@ type webStatus struct {
 	Pan           int
 	Tilt          int
 	Zoom          int
+	PanLo         int
+	PanHi         int
+	TiltLo        int
+	TiltHi        int
+	ZoomLo        int
+	ZoomHi        int
 	InCall        bool
 	Auto          pixy.AutoMode
 	Online        bool

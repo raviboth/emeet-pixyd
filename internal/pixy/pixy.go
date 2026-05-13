@@ -247,6 +247,51 @@ func DefaultState() State {
 	}
 }
 
+// AxisPan / AxisTilt / AxisZoom mirror the strings used by the daemon
+// command grammar. Declared here so PTZLimits.For / .Has can match the
+// same axis names without the pixy package importing the main package.
+const (
+	AxisPan  = "pan"
+	AxisTilt = "tilt"
+	AxisZoom = "zoom"
+)
+
+// PTZLimits holds the per-axis (min, max) ranges reported by the device
+// driver. A zero range ([0, 0]) means the daemon has not been able to
+// probe the driver and callers should fall back to the package-level
+// constants in the main package.
+type PTZLimits struct {
+	Pan  [2]int
+	Tilt [2]int
+	Zoom [2]int
+}
+
+// Has reports whether the named axis has a non-zero range stored.
+func (l PTZLimits) Has(axis string) bool {
+	r := l.rangeFor(axis)
+	return r[0] != 0 || r[1] != 0
+}
+
+// For returns the stored (min, max) for the named axis. Callers should
+// gate on Has first; an unknown axis or an unset range returns (0, 0).
+func (l PTZLimits) For(axis string) (int, int) {
+	r := l.rangeFor(axis)
+	return r[0], r[1]
+}
+
+func (l PTZLimits) rangeFor(axis string) [2]int {
+	switch axis {
+	case AxisPan:
+		return l.Pan
+	case AxisTilt:
+		return l.Tilt
+	case AxisZoom:
+		return l.Zoom
+	}
+	return [2]int{0, 0}
+}
+
+
 // Config holds daemon configuration parameters.
 // Fields marked with env tags are read from environment variables by ConfigFromEnv().
 type Config struct {

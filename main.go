@@ -51,6 +51,15 @@ type Daemon struct {
 		expiresAt time.Time
 	}
 
+	// ptzLimits caches per-axis driver-reported ranges. Populated by
+	// probeDevices; a zero-valued PTZLimits means probing failed (or has
+	// not happened yet) and callers fall back to the pixy package
+	// constants.
+	ptzLimits struct {
+		mu     sync.RWMutex
+		values pixy.PTZLimits
+	}
+
 	streamSema chan struct{}
 
 	events *events.Broadcaster

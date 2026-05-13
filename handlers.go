@@ -96,6 +96,9 @@ func (s *webServer) getWebStatus() webStatus {
 	}
 	if status.Online {
 		status.Zoom = zoomDefault
+		status.PanLo, status.PanHi = s.daemon.effectivePTZLimits(pixy.AxisPan)
+		status.TiltLo, status.TiltHi = s.daemon.effectivePTZLimits(pixy.AxisTilt)
+		status.ZoomLo, status.ZoomHi = s.daemon.effectivePTZLimits(pixy.AxisZoom)
 	}
 
 	return status
@@ -344,7 +347,7 @@ func (s *webServer) handlePTZ(responseWriter http.ResponseWriter, request *http.
 		http.Error(responseWriter, "invalid value", http.StatusBadRequest)
 		return
 	}
-	lo, hi := ptzLimits(axis)
+	lo, hi := s.daemon.effectivePTZLimits(axis)
 	intVal = clampInt(intVal, lo, hi)
 	resp := s.daemon.handleCommand(request.Context(), axis+" "+strconv.Itoa(intVal))
 	slog.Debug("web ptz", "axis", axis, "val", intVal, "response", resp)

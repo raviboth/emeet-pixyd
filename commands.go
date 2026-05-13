@@ -279,7 +279,7 @@ func (d *Daemon) handlePTZCommand(ctx context.Context, parts []string) string {
 
 	axis := parts[0]
 
-	lo, hi := ptzLimits(axis)
+	lo, hi := d.effectivePTZLimits(axis)
 	val, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return (&CommandError{Op: axis, Err: fmt.Errorf("%w: parse error", ErrInvalidValue)}).Error()

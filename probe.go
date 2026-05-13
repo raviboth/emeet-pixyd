@@ -3,11 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -133,7 +135,46 @@ func (d *Daemon) probeDevices() {
 		if d.state.Camera == pixy.StateOffline {
 			d.state.Camera = pixy.StatePrivacy
 		}
+
+		d.refreshPTZLimits()
 	} else {
 		d.state.Camera = pixy.StateOffline
 	}
+}
+
+// refreshPTZLimits queries the V4L2 driver for the actual PTZ ranges on
+// the current video device and caches them. Bounded by a short timeout so
+// a misbehaving driver cannot stall daemon probing.
+func (d *Daemon) refreshPTZLimits() {
+	if d.videoDev == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	lim := parsePTZLimits(ctx, d.videoDev)
+
+	d.ptzLimits.mu.Lock()
+	d.ptzLimits.values = lim
+	d.ptzLimits.mu.Unlock()
+
+	slog.Info("ptz limits probed",
+		"device", d.videoDev,
+		"pan", lim.Pan, "tilt", lim.Tilt, "zoom", lim.Zoom,
+	)
+}
+
+// effectivePTZLimits returns the (min, max) for an axis, preferring the
+// driver-reported values cached at probe time and falling back to the
+// pixy package constants. Used by both the HTTP and command-grammar
+// paths so the same range governs slider rendering and request
+// clamping.
+func (d *Daemon) effectivePTZLimits(axis string) (int, int) {
+	d.ptzLimits.mu.RLock()
+	lim := d.ptzLimits.values
+	d.ptzLimits.mu.RUnlock()
+	if lim.Has(axis) {
+		return lim.For(axis)
+	}
+	return ptzLimits(axis)
 }

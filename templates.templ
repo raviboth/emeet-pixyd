@@ -255,9 +255,9 @@ templ statusPanel(s webStatus) {
 		if s.Online {
 			<div class="card" style="margin-bottom:1rem">
 				<div class="card-title">PTZ</div>
-				@ptzSlider("Pan", "pan", -150, 150, s.Pan, "°")
-				@ptzSlider("Tilt", "tilt", -90, 90, s.Tilt, "°")
-				@ptzSlider("Zoom", "zoom", 100, 150, s.Zoom, "x")
+				@ptzSlider("Pan", "pan", s.PanLo, s.PanHi, s.Pan, "°")
+				@ptzSlider("Tilt", "tilt", s.TiltLo, s.TiltHi, s.Tilt, "°")
+				@ptzSlider("Zoom", "zoom", s.ZoomLo, s.ZoomHi, s.Zoom, "x")
 				@ptzPad()
 				<div class="spacer"></div>
 				<div class="btn-group">
