@@ -234,21 +234,50 @@
       var okSlider = document.getElementById("slider-" + okAxis);
       if (okSlider) okSlider.dataset.lastGood = okSlider.value;
     }
+
+    // Force the preview to drop its buffered frames after any framing change.
+    // ffmpeg + the multipart parser queue a second or two of frames, so PTZ
+    // changes otherwise appear stuck at the old position until the queue
+    // drains. Reloading the <img> src starts a fresh stream with empty
+    // buffers; the new ffmpeg child sees the camera at the new position.
+    if (pathAffectsFraming(path)) {
+      reloadPreview();
+    }
   });
 
+  // htmx:afterSwap fires when the SSE-driven panel swap replaces the
+  // preview-section subtree. The <img> tag is re-inserted but browsers
+  // de-duplicate identical src strings, so add a cache-bust so the
+  // fetch actually re-runs.
   document.addEventListener("htmx:afterSwap", function (e) {
     if (!e.detail || !e.detail.target) return;
     if (e.detail.target.id !== "preview-section") return;
     var img = document.getElementById("preview-img");
     if (img) {
-      // Force the browser to actually issue the request even if the URL string
-      // looks identical to a previously-failed one. Setting src to itself with
-      // an updated cache-bust kicks off a new fetch.
       var url = img.getAttribute("src") || "/api/stream";
       var sep = url.indexOf("?") >= 0 ? "&" : "?";
       img.src = url + sep + "_=" + Date.now();
     }
   });
+
+  function pathAffectsFraming(p) {
+    if (!p) return false;
+    if (p.indexOf("/api/ptz/") === 0) return true;
+    return p === "/api/center";
+  }
+
+  function reloadPreview() {
+    var img = document.getElementById("preview-img");
+    if (!img) return;
+    // Clear src first so the browser cancels the in-flight stream cleanly.
+    // The daemon's stream semaphore is size 1; without this gap a new
+    // request can race the old one and get a 503 "stream already in use",
+    // which then falls into the slow exponential-backoff retry path.
+    img.src = "";
+    setTimeout(function () {
+      img.src = "/api/stream?" + Date.now();
+    }, 150);
+  }
 
   document.addEventListener("htmx:responseError", function (e) {
     if (e.detail && e.detail.xhr && abortedXhrs.has(e.detail.xhr)) return;
