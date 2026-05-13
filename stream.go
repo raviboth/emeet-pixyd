@@ -31,8 +31,21 @@ func (s *webServer) handleSnapshot(responseWriter http.ResponseWriter, _ *http.R
 }
 
 func ffmpegStreamCmd(ctx context.Context, device string) *exec.Cmd {
+	// Input flags below trim ffmpeg's default frame queueing so PTZ changes
+	// surface in the preview within ~1 frame instead of buffering for a
+	// second or more. -fflags nobuffer disables the input frame queue;
+	// -flags low_delay disables decoder reordering; -probesize / -analyzeduration
+	// skip the long codec sniff at stream start (we already know it is mjpeg);
+	// -fpsprobesize 0 skips the framerate probe (UVC reports it directly).
 	return exec.CommandContext(ctx,
 		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-fflags", "nobuffer",
+		"-flags", "low_delay",
+		"-probesize", "32",
+		"-analyzeduration", "0",
+		"-fpsprobesize", "0",
 		"-f", "v4l2",
 		"-input_format", "mjpeg",
 		"-video_size", "1920x1080",
