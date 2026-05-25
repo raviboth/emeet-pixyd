@@ -46,6 +46,12 @@ const (
 	gestureConfigMark2 byte = 0x01
 	gestureConfigMark3 byte = 0x02
 	gestureEnabledByte byte = 0x01
+	// gestureStateOffset is the byte index in a hidInterfaceGesture
+	// response that carries the current enabled flag. Observed values
+	// at this offset on the EMEET PIXY (vendor 328f:00c0) are 0x01 when
+	// gesture detection is on and 0x00 when off; trailing bytes are
+	// padding.
+	gestureStateOffset = 9
 
 	hidCommandSleepMs = 200
 
@@ -206,7 +212,15 @@ func parseHIDResponse(data []byte) hidResponse {
 			resp.Audio = pixy.AudioNC
 		}
 	case data[0] == cameraConfigPrefix && data[1] == hidInterfaceGesture:
-		resp.Gesture = data[len(data)-1] == gestureEnabledByte
+		// The gesture-enabled state lives at a fixed offset directly after
+		// the 9-byte command echo. The previous reader took
+		// data[len(data)-1], which on the EMEET PIXY firmware is always
+		// trailing padding (0x00), so the parser silently reported
+		// "gesture off" for every response and any periodic sync would
+		// overwrite the daemon's belief.
+		if len(data) > gestureStateOffset {
+			resp.Gesture = data[gestureStateOffset] == gestureEnabledByte
+		}
 	}
 
 	return resp
