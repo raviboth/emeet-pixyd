@@ -34,8 +34,22 @@ const (
 	zoomMax = 150
 
 	staticCacheMaxAge = 7 * 24 * time.Hour
-	ffmpegShutdown    = 2 * time.Second
+	// ffmpegShutdown bounds how long handleStream's defer waits for the
+	// ffmpeg child to exit cleanly before SIGKILL. The MJPEG-over-pipe
+	// pipeline has no per-frame state worth flushing, so a short grace
+	// period is enough; keeping the value low matters because the stream
+	// semaphore is held until this wait completes, and a slow release
+	// makes "reload preview after PTZ" race the new request into 503.
+	ffmpegShutdown    = 250 * time.Millisecond
 	streamBufSize     = 64 * 1024
+	// streamFrameWriteTimeout caps how long handleStream waits for the
+	// client to accept a single frame. High enough that a normal
+	// reader-side pause (UI repaint, tab visibility transition) does
+	// not drop the stream, low enough that a hung / suspended client
+	// surrenders the daemon's single stream slot in seconds, not
+	// minutes (the original failure mode that pinned the slot after a
+	// tab was moved to a background workspace).
+	streamFrameWriteTimeout = 5 * time.Second
 
 	toastTypeSuccess = "success"
 	toastTypeInfo    = "info"

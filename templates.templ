@@ -43,7 +43,7 @@ templ page(s webStatus) {
 }
 
 templ previewSection(s webStatus) {
-	<div id="preview-section" hx-get="/preview" hx-trigger="refresh from:body" hx-swap="outerHTML">
+	<div id="preview-section" hx-get="/preview" hx-trigger="pixy:previewRefresh from:body" hx-swap="outerHTML">
 		<div class="card">
 			<div class="card-title-row">
 				<div class="card-title">Preview</div>

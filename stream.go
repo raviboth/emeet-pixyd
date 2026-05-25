@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
-	"syscall"
 	"time"
 )
 
@@ -60,15 +59,22 @@ func ffmpegStreamCmd(ctx context.Context, device string) *exec.Cmd {
 	)
 }
 
+// cleanupFFmpeg terminates the ffmpeg child after a stream request ends.
+// SIGKILL is used directly rather than SIGTERM-then-wait: MJPEG-over-pipe
+// has no per-frame state worth flushing, and the daemon's stream
+// semaphore is held until this returns, so any grace period directly
+// translates into a "stream already in use" 503 window for the client's
+// reconnect-after-PTZ flow. ffmpegShutdown bounds how long Wait may
+// block after SIGKILL (it almost always returns within a few ms).
 func cleanupFFmpeg(cmd *exec.Cmd) {
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	_ = cmd.Process.Kill()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case <-done:
 	case <-time.After(ffmpegShutdown):
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		// Process did not get reaped; orphan the wait goroutine and
+		// move on so we do not hold the stream semaphore forever.
 	}
 }
 
@@ -76,11 +82,21 @@ func (s *webServer) handleStream(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) {
+	// Wait briefly for the stream slot. This covers the common case of a
+	// reconnect (e.g. PTZ-induced reload, page refresh, htmx swap) racing
+	// the previous request's ffmpeg cleanup. Without the wait the new
+	// request lands on 503 within microseconds, the browser fires
+	// img.onerror, and the user sees a black screen until the exponential
+	// backoff retry fires seconds later. Beyond the timeout we still
+	// return 503 so a genuinely-stuck slot does not block forever.
+	const streamSemaWait = time.Second
+	semaCtx, semaCancel := context.WithTimeout(request.Context(), streamSemaWait)
 	select {
 	case s.daemon.streamSema <- struct{}{}:
-	default:
+		semaCancel()
+	case <-semaCtx.Done():
+		semaCancel()
 		http.Error(responseWriter, "stream already in use", http.StatusServiceUnavailable)
-
 		return
 	}
 	defer func() { <-s.daemon.streamSema }()
@@ -102,9 +118,12 @@ func (s *webServer) handleStream(
 		return
 	}
 	rc := http.NewResponseController(responseWriter)
-	if dlErr := rc.SetWriteDeadline(time.Time{}); dlErr != nil {
-		slog.Debug("clear write deadline", "error", dlErr)
-	}
+	// Per-frame write deadline below. Do not clear the deadline up front;
+	// each iteration of the frame loop refreshes it so a slow / stuck
+	// client (e.g. tab moved to a background workspace, suspended laptop,
+	// network stall) does not pin the daemon's single stream slot forever
+	// via TCP back-pressure. The deadline is generous so a transient
+	// pause in the client does not drop the connection.
 	ctx, cancel := context.WithCancel(request.Context())
 	s.daemon.streamMu.Lock()
 	s.daemon.streamCancel = cancel
@@ -169,6 +188,14 @@ func (s *webServer) handleStream(
 		s.daemon.lastFrame.Lock()
 		s.daemon.lastFrame.data = frame
 		s.daemon.lastFrame.Unlock()
+
+		// Reset the write deadline for this frame. If the client is not
+		// draining, the three writes below return os.ErrDeadlineExceeded
+		// and the handler unwinds, releasing the stream semaphore so the
+		// next request (e.g. the user's panel reload) can take over.
+		if dlErr := rc.SetWriteDeadline(time.Now().Add(streamFrameWriteTimeout)); dlErr != nil {
+			slog.Debug("set write deadline", "error", dlErr)
+		}
 
 		_, headerErr := fmt.Fprintf(
 

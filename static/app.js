@@ -7,8 +7,13 @@
   var pendingRequests = new Map();
   var abortedXhrs = new WeakSet();
   var consecutiveErrors = 0;
-  var streamRetryDelay = 3000;
-  var maxStreamRetryDelay = 30000;
+  // First retry is fast: 503 on /api/stream is almost always the daemon
+  // releasing its single ffmpeg slot from the previous request. Capping
+  // the backoff low keeps the preview from staying black for half a
+  // minute if the doubler escalates: the daemon now write-timeouts
+  // stuck slots within 5 s, so longer waits cannot help.
+  var streamRetryDelay = 500;
+  var maxStreamRetryDelay = 5000;
   var sliderInteracting = false;
   var sliderInteractEndTimer = null;
 
@@ -235,49 +240,13 @@
       if (okSlider) okSlider.dataset.lastGood = okSlider.value;
     }
 
-    // Force the preview to drop its buffered frames after any framing change.
-    // ffmpeg + the multipart parser queue a second or two of frames, so PTZ
-    // changes otherwise appear stuck at the old position until the queue
-    // drains. Reloading the <img> src starts a fresh stream with empty
-    // buffers; the new ffmpeg child sees the camera at the new position.
-    if (pathAffectsFraming(path)) {
-      reloadPreview();
-    }
+    // Note: no preview reload triggered from here. The daemon publishes
+    // a PTZ SSE event after handlePTZ commits, and the inner IIFE's
+    // scheduleRefresh swaps preview-section in response. Triggering
+    // another reload from this handler stacks 2-3 reconnects on the
+    // daemon's size-1 stream semaphore and lands one of them on 503,
+    // which then drops into the slow exponential backoff (black screen).
   });
-
-  // htmx:afterSwap fires when the SSE-driven panel swap replaces the
-  // preview-section subtree. The <img> tag is re-inserted but browsers
-  // de-duplicate identical src strings, so add a cache-bust so the
-  // fetch actually re-runs.
-  document.addEventListener("htmx:afterSwap", function (e) {
-    if (!e.detail || !e.detail.target) return;
-    if (e.detail.target.id !== "preview-section") return;
-    var img = document.getElementById("preview-img");
-    if (img) {
-      var url = img.getAttribute("src") || "/api/stream";
-      var sep = url.indexOf("?") >= 0 ? "&" : "?";
-      img.src = url + sep + "_=" + Date.now();
-    }
-  });
-
-  function pathAffectsFraming(p) {
-    if (!p) return false;
-    if (p.indexOf("/api/ptz/") === 0) return true;
-    return p === "/api/center";
-  }
-
-  function reloadPreview() {
-    var img = document.getElementById("preview-img");
-    if (!img) return;
-    // Clear src first so the browser cancels the in-flight stream cleanly.
-    // The daemon's stream semaphore is size 1; without this gap a new
-    // request can race the old one and get a 503 "stream already in use",
-    // which then falls into the slow exponential-backoff retry path.
-    img.src = "";
-    setTimeout(function () {
-      img.src = "/api/stream?" + Date.now();
-    }, 150);
-  }
 
   document.addEventListener("htmx:responseError", function (e) {
     if (e.detail && e.detail.xhr && abortedXhrs.has(e.detail.xhr)) return;
@@ -331,15 +300,25 @@
         refreshDebounceTimer = null;
         if (document.visibilityState !== "visible") return;
         htmx.trigger(document.body, "refresh");
-        var preview = document.getElementById("preview-section");
-        if (preview) {
-          htmx.ajax("GET", "/preview", {
-            target: "#preview-section",
-            swap: "outerHTML",
-          });
-        }
       }, 50);
     }
+
+    // refreshPreviewSection swaps just the preview-section card. Reserve
+    // for transitions that actually change what is rendered in that card
+    // (privacy on/off, online flag, paused toggle); any other reason
+    // tears down the <img> and races the daemon's stream semaphore.
+    function refreshPreviewSection() {
+      var preview = document.getElementById("preview-section");
+      if (!preview) return;
+      // Fire the dedicated pixy:previewRefresh event rather than calling
+      // htmx.ajax directly: preview-section subscribes to it via the
+      // template's hx-trigger so the swap goes through htmx's
+      // request-de-duplication.
+      htmx.trigger(document.body, "pixy:previewRefresh");
+    }
+
+    var lastCamera = null;
+    var lastOnline = null;
 
     function connect() {
       try {
@@ -348,20 +327,57 @@
         return;
       }
       es.addEventListener("state", function (e) {
+        // Always nudge non-preview hx-trigger="refresh" listeners so the
+        // status panel reflects audio mode / gesture / auto / inCall.
         scheduleRefresh();
+
+        var data;
         try {
-          var data = JSON.parse(e.data);
-          // When camera leaves privacy mode, nudge preview to reload via the
-          // existing pixy:previewReset path. The /panel refetch is async; the
-          // event-driven nudge avoids waiting for it.
-          if (data && data.camera && data.camera !== "privacy") {
-            htmx.trigger(document.body, "pixy:previewReset");
-          }
+          data = JSON.parse(e.data);
         } catch (err) {
-          /* ignore parse errors */
+          // Couldn't decode; fall back to the conservative full refresh.
+          refreshPreviewSection();
+          return;
+        }
+        if (!data) return;
+
+        // Only swap preview-section when the card's rendered content can
+        // actually change. The card depends on whether the preview is
+        // displayable: online && camera !== "privacy". Track <-> idle <->
+        // sleep <-> scanning all render the same live <img>, so a swap on
+        // those transitions only tears the <img> down and races the
+        // daemon's stream semaphore. PreviewPaused is server-driven
+        // through /api/preview/toggle which already swaps preview-section
+        // via hx-target, so it does not need to fire from here.
+        var firstEvent = lastCamera === null && lastOnline === null;
+        var wasDisplayable = !firstEvent && lastCamera !== "privacy" && lastOnline;
+        var nowDisplayable = data.camera !== "privacy" && data.online;
+        if (!firstEvent && wasDisplayable !== nowDisplayable) {
+          refreshPreviewSection();
+        }
+
+        var leftPrivacy = lastCamera === "privacy" && data.camera && data.camera !== "privacy";
+        lastCamera = data.camera;
+        lastOnline = data.online;
+
+        // When the camera leaves privacy, nudge the preview reload path so
+        // the new stream is fetched even if the swap above is already in
+        // flight or skipped (e.g. previewPaused gating).
+        if (leftPrivacy) {
+          htmx.trigger(document.body, "pixy:previewReset");
         }
       });
-      es.addEventListener("ptz", scheduleRefresh);
+      // PTZ events do NOT need a preview-section swap: the camera has
+      // already moved and the in-flight MJPEG stream will reflect the new
+      // framing on its next frame. Re-swapping preview-section tears down
+      // the <img>, races the daemon's stream semaphore release, and one
+      // of every few attempts lands on a 503 ("stream already in use")
+      // which then drops the user into a 3 s exponential-backoff black
+      // screen. Just nudge other status-panel listeners so any slider
+      // value catches up if the change came from outside (tray / CLI).
+      es.addEventListener("ptz", function () {
+        htmx.trigger(document.body, "refresh");
+      });
       es.addEventListener("online", scheduleRefresh);
       es.onopen = function () {
         retryDelay = 1000;
@@ -413,7 +429,7 @@
     }
 
     img.addEventListener("load", function () {
-      streamRetryDelay = 3000;
+      streamRetryDelay = 500;
     });
 
     img.addEventListener("error", function () {
@@ -437,7 +453,7 @@
     });
 
     document.body.addEventListener("pixy:previewReset", function () {
-      streamRetryDelay = 3000;
+      streamRetryDelay = 500;
       reloadPreview(500);
     });
   })();
