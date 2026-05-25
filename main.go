@@ -558,6 +558,14 @@ func (d *Daemon) waybarOutput() string {
 
 const socketIOTimeout = 5 * time.Second
 
+// hardwareSyncInterval is the period at which the daemon re-queries the
+// camera for its actual tracking/audio/gesture state. The poll is gated
+// by cmdMu so it never races an in-flight write; the cost is three
+// short HID reads per tick. Tuned for "I waved my hand and the UI
+// should reflect the new tracking state within a few seconds" without
+// hammering the HID interface.
+const hardwareSyncInterval = 3 * time.Second
+
 func (d *Daemon) listenUnix(ctx context.Context) error {
 	socketPath := d.config.SocketPath()
 	_ = os.Remove(socketPath)
@@ -690,6 +698,17 @@ func (d *Daemon) Run() {
 	ticker := time.NewTicker(d.config.PollInterval)
 	defer ticker.Stop()
 
+	// Hardware-state sync ticker. The camera can flip its own
+	// tracking/audio/gesture state independently of the daemon: the
+	// physical privacy slider, the hand-gesture trigger when gesture
+	// detection is enabled, and the EMEET utility on another OS can
+	// all do this. Without a periodic re-query, d.state drifts from
+	// the device and the UI shows stale buttons until the user clicks
+	// Sync. The poll is cheap (three HID reads) and gated by cmdMu so
+	// it cannot race an in-flight setTracking / setAudio / setGesture.
+	hwSyncTicker := time.NewTicker(hardwareSyncInterval)
+	defer hwSyncTicker.Stop()
+
 	ueventCh := make(chan struct{}, 8)
 	go d.listenUevents(ctx, ueventCh)
 
@@ -735,6 +754,16 @@ func (d *Daemon) Run() {
 		case <-ticker.C:
 			d.autoManage(ctx)
 			sdNotify("WATCHDOG=1")
+		case <-hwSyncTicker.C:
+			d.mu.RLock()
+			videoDev := d.videoDev
+			d.mu.RUnlock()
+			if videoDev == "" {
+				continue
+			}
+			d.cmdMu.Lock()
+			_ = d.syncState(ctx)
+			d.cmdMu.Unlock()
 		}
 	}
 }
