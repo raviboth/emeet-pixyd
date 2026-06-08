@@ -46,6 +46,15 @@ type Daemon struct {
 
 	ptzCache ptzCache
 
+	// ptzLimits caches per-axis driver-reported ranges. Populated by
+	// refreshPTZLimits after applyProbeResult finds a video device. A
+	// zero-valued PTZLimits means probing failed or has not happened
+	// yet and callers fall back to the ptzAxes map's Min/Max.
+	ptzLimits struct {
+		mu     sync.RWMutex
+		values pixy.PTZLimits
+	}
+
 	streamSema chan struct{}
 
 	deps Dependencies

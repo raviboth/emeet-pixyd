@@ -139,3 +139,79 @@ func parsePTZValues(ctx context.Context, dev string) pixy.PTZValues {
 
 	return ptz
 }
+
+// parsePTZLimits queries the driver for the actual min/max range of each
+// PTZ control. UVC firmwares (and EMEET in particular) advertise narrower
+// ranges than the daemon's hardcoded constants in some cases (e.g. zoom
+// tops out at 150, not 400) and wider ones in others (tilt goes to +/-90,
+// not +/-30). Pan/tilt values are converted from the v4l2 internal unit
+// (degrees * v4l2UnitsPerDegree) back to degrees. A failure to invoke
+// v4l2-ctl returns a zero-valued PTZLimits; callers fall back to the
+// ptzAxes map's Min/Max.
+func parsePTZLimits(ctx context.Context, dev string) pixy.PTZLimits {
+	out, err := exec.CommandContext(
+		ctx, v4l2ctl, "-d", dev, "--list-ctrls",
+	).Output()
+	if err != nil {
+		//nolint:exhaustruct
+		return pixy.PTZLimits{}
+	}
+
+	//nolint:exhaustruct
+	var lim pixy.PTZLimits
+	for line := range strings.SplitSeq(string(out), "\n") {
+		switch {
+		case strings.Contains(line, "pan_absolute"):
+			if lo, hi, ok := extractV4L2MinMax(line); ok {
+				lim.Pan = [2]int{lo / v4l2UnitsPerDegree, hi / v4l2UnitsPerDegree}
+			}
+		case strings.Contains(line, "tilt_absolute"):
+			if lo, hi, ok := extractV4L2MinMax(line); ok {
+				lim.Tilt = [2]int{lo / v4l2UnitsPerDegree, hi / v4l2UnitsPerDegree}
+			}
+		case strings.Contains(line, "zoom_absolute"):
+			if lo, hi, ok := extractV4L2MinMax(line); ok {
+				lim.Zoom = [2]int{lo, hi}
+			}
+		}
+	}
+
+	return lim
+}
+
+// extractV4L2MinMax pulls the "min=N max=N" pair from a single v4l2-ctl
+// --list-ctrls output line. Lines look like:
+//
+//	pan_absolute 0x009a0908 (int) : min=-540000 max=540000 step=3600 ...
+//
+// Split out so it can be unit-tested without spawning v4l2-ctl.
+func extractV4L2MinMax(line string) (int, int, bool) {
+	lo, ok := extractV4L2Int(line, "min=")
+	if !ok {
+		return 0, 0, false
+	}
+	hi, ok := extractV4L2Int(line, "max=")
+	if !ok {
+		return 0, 0, false
+	}
+
+	return lo, hi, true
+}
+
+func extractV4L2Int(line, prefix string) (int, bool) {
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return 0, false
+	}
+	rest := line[idx+len(prefix):]
+	end := strings.IndexAny(rest, " \t")
+	if end < 0 {
+		end = len(rest)
+	}
+	v, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0, false
+	}
+
+	return v, true
+}

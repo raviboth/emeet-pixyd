@@ -319,7 +319,8 @@ func (d *Daemon) handlePTZCommand(ctx context.Context, parts []string) CommandRe
 		val = current.Get(axis) + val
 	}
 
-	val = clampInt(val, info.Min, info.Max)
+	lo, hi := d.effectivePTZLimits(axis)
+	val = clampInt(val, lo, hi)
 
 	hwVal := val * info.Multiplier
 	if info.Invert {

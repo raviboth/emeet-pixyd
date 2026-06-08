@@ -102,6 +102,9 @@ func (s *webServer) getWebStatus() webStatus {
 	if status.Online {
 		status.Zoom = pixy.ZoomDefault
 	}
+	status.PanLo, status.PanHi = s.daemon.effectivePTZLimits(pixy.AxisPan)
+	status.TiltLo, status.TiltHi = s.daemon.effectivePTZLimits(pixy.AxisTilt)
+	status.ZoomLo, status.ZoomHi = s.daemon.effectivePTZLimits(pixy.AxisZoom)
 
 	return status
 }
@@ -256,7 +259,8 @@ func (s *webServer) handlePTZ(responseWriter http.ResponseWriter, request *http.
 	}
 
 	info := ptzAxes[axis]
-	intVal = clampInt(intVal, info.Min, info.Max)
+	lo, hi := s.daemon.effectivePTZLimits(axis)
+	intVal = clampInt(intVal, lo, hi)
 	result := s.daemon.handleCommand(request.Context(), axis+" "+strconv.Itoa(intVal))
 	slog.Debug("web ptz", "axis", axis, "val", intVal, "response", result.String())
 
@@ -264,7 +268,7 @@ func (s *webServer) handlePTZ(responseWriter http.ResponseWriter, request *http.
 		status := s.getWebStatusWithPTZ(request.Context())
 		sliderVal := ptzAxisValue(axis, status)
 		templ.Handler(ptzSliderWithToast( //nolint:contextcheck
-			info.Label, axis, info.Min, info.Max, sliderVal, info.Unit,
+			info.Label, axis, lo, hi, sliderVal, info.Unit,
 			result.String(), toastTypeError,
 		)).ServeHTTP(responseWriter, request)
 
@@ -274,7 +278,7 @@ func (s *webServer) handlePTZ(responseWriter http.ResponseWriter, request *http.
 	s.invalidatePTZCache()
 
 	templ.Handler(ptzSliderWithToast( //nolint:contextcheck
-		info.Label, axis, info.Min, info.Max, intVal, info.Unit,
+		info.Label, axis, lo, hi, intVal, info.Unit,
 		"", "",
 	)).ServeHTTP(responseWriter, request)
 }
