@@ -321,11 +321,16 @@ func (d *Daemon) handlePTZCommand(ctx context.Context, parts []string) CommandRe
 
 	val = clampInt(val, info.Min, info.Max)
 
+	hwVal := val * info.Multiplier
+	if info.Invert {
+		hwVal = -hwVal
+	}
+
 	v4l2Err := d.deps.v4l2Set(
 		ctx,
 		videoDev,
 		info.V4L2Ctrl,
-		strconv.Itoa(val*info.Multiplier),
+		strconv.Itoa(hwVal),
 	)
 	if v4l2Err != nil {
 		return errResult(axis, v4l2Err)

@@ -240,9 +240,12 @@ func TestBehavior_PTZClampingAndMultiplier(t *testing.T) {
 	d, v4l2Calls := newPTZCaptureDaemon()
 
 	// When pan is set beyond the maximum (200 → clamp to 170)
+	// Pan is inverted at the v4l2 boundary so that slider-right is
+	// camera-right on EMEET PIXY firmware, so the v4l2 value is the
+	// negative of (clamped value * multiplier).
 	resp := d.handlePTZCommand(context.Background(), []string{pixy.AxisPan, "200"})
 	notError(t, resp)
-	assertV4L2Call(t, *v4l2Calls, "612000")
+	assertV4L2Call(t, *v4l2Calls, "-612000")
 
 	// When tilt is set beyond minimum (-50 → clamp to -30)
 	*v4l2Calls = nil

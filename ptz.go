@@ -24,13 +24,19 @@ type ptzAxisInfo struct {
 	Unit       string
 	V4L2Ctrl   string
 	Multiplier int
+	// Invert negates the value at the v4l2 boundary. On EMEET PIXY
+	// the V4L2 pan_absolute sign convention is the opposite of the
+	// camera's physical movement: a positive pan_absolute drives the
+	// camera left. Inverting at the boundary lets the daemon present
+	// "slider-right = camera-right" everywhere above this layer.
+	Invert bool
 }
 
 //nolint:gochecknoglobals
 var ptzAxes = map[string]ptzAxisInfo{
 	pixy.AxisPan: {
 		Min: pixy.PanMin, Max: pixy.PanMax, Label: "Pan", Unit: "\u00b0",
-		V4L2Ctrl: "pan_absolute", Multiplier: v4l2UnitsPerDegree,
+		V4L2Ctrl: "pan_absolute", Multiplier: v4l2UnitsPerDegree, Invert: true,
 	},
 	pixy.AxisTilt: {
 		Min: pixy.TiltMin, Max: pixy.TiltMax, Label: "Tilt", Unit: "\u00b0",
@@ -124,7 +130,11 @@ func parsePTZValues(ctx context.Context, dev string) pixy.PTZValues {
 		}
 
 		info := ptzAxes[axis]
-		ptz = ptz.Set(axis, v/info.Multiplier)
+		val := v / info.Multiplier
+		if info.Invert {
+			val = -val
+		}
+		ptz = ptz.Set(axis, val)
 	}
 
 	return ptz
