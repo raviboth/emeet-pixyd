@@ -330,4 +330,49 @@
       streamRetryDelay = Math.min(streamRetryDelay * 2, STREAM_RETRY_MAX_MS);
     });
   })();
+
+  // PTZ nudge pad: SVG wedges with data-axis / data-delta attributes
+  // act as relative-step buttons against the existing PTZ slider.
+  // Update the slider value optimistically so the user sees the new
+  // position before the daemon round-trips; POST the new absolute
+  // value to /api/ptz/{axis}. Clamp against the slider's own
+  // min/max which already reflect the driver-reported limits.
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-axis], [data-action]");
+    if (
+      !t ||
+      (!t.classList.contains("ptz-pad-wedge") &&
+        !t.classList.contains("ptz-pad-home"))
+    )
+      return;
+    var action = t.getAttribute("data-action");
+    if (action === "center") {
+      htmx.ajax("POST", "/api/center", {
+        target: "#status-panel",
+        swap: "outerHTML",
+      });
+      return;
+    }
+    var axis = t.getAttribute("data-axis");
+    var delta = parseInt(t.getAttribute("data-delta"), 10);
+    if (!axis || isNaN(delta)) return;
+    var slider = document.getElementById("slider-" + axis);
+    if (!slider) return;
+    var current = parseInt(slider.value, 10) || 0;
+    var lo = parseInt(slider.min, 10);
+    var hi = parseInt(slider.max, 10);
+    var next = Math.max(lo, Math.min(hi, current + delta));
+    if (next === current) return;
+    slider.value = next;
+    var valEl = document.getElementById("val-" + axis);
+    if (valEl) {
+      var suffix = axis === "zoom" ? "x" : "°";
+      valEl.textContent = next + suffix;
+    }
+    htmx.ajax("POST", "/api/ptz/" + axis, {
+      target: "#ptz-" + axis,
+      swap: "outerHTML",
+      values: { value: String(next) },
+    });
+  });
 })();

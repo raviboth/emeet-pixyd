@@ -731,3 +731,105 @@ button.htmx-request {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* PTZ nudge pad: SVG joystick with 8 wedges (4 outer +/-10, 4 inner
+   +/-1) plus a center home that calls /api/center. The wedges are
+   pure SVG paths with data-axis / data-delta attributes; the click
+   handler in app.js reads those, applies a relative bump to the
+   matching slider, and POSTs the updated value. The pad is purely a
+   convenience over the slider drag; both endpoints land on the same
+   /api/ptz/{axis} handler. */
+.ptz-pad-wrap {
+  position: relative;
+  width: 220px;
+  margin: 1rem auto 0.5rem;
+}
+
+.ptz-pad {
+  width: 220px;
+  height: 220px;
+  display: block;
+  user-select: none;
+}
+
+.ptz-pad-wedge {
+  fill: var(--surface-elev, #20242c);
+  stroke: var(--border, #2c313a);
+  stroke-width: 1;
+  cursor: pointer;
+  transition: fill 0.15s, stroke 0.15s;
+}
+
+.ptz-pad-wedge:hover {
+  fill: var(--accent, #ffb454);
+  stroke: var(--accent, #ffb454);
+}
+
+.ptz-pad-wedge:active {
+  fill: var(--text-bright, #ffffff);
+  stroke: var(--text-bright, #ffffff);
+}
+
+.ptz-pad-home {
+  fill: var(--surface, #1a1d24);
+  stroke: var(--border, #2c313a);
+  stroke-width: 1;
+  cursor: pointer;
+  transition: fill 0.15s, stroke 0.15s;
+}
+
+.ptz-pad-home:hover {
+  fill: var(--green, #2ecc71);
+  stroke: var(--green, #2ecc71);
+}
+
+.ptz-pad-home:active {
+  fill: var(--text-bright, #ffffff);
+  stroke: var(--text-bright, #ffffff);
+}
+
+.ptz-pad-home-icon {
+  fill: var(--green, #2ecc71);
+  pointer-events: none;
+}
+
+.ptz-pad-label {
+  fill: var(--text-dim, #8b8f96);
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+  dominant-baseline: middle;
+}
+
+.ptz-pad-axis {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text-dim, #8b8f96);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+.ptz-pad-axis-top {
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ptz-pad-axis-bottom {
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ptz-pad-axis-left {
+  left: -8px;
+  top: 50%;
+  transform: translate(-100%, -50%);
+}
+
+.ptz-pad-axis-right {
+  right: -8px;
+  top: 50%;
+  transform: translate(100%, -50%);
+}

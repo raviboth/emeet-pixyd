@@ -93,6 +93,39 @@ templ previewSection(s webStatus) {
 	</div>
 }
 
+templ ptzPad() {
+	<div class="ptz-pad-wrap">
+		<div class="ptz-pad-axis ptz-pad-axis-top">tilt +</div>
+		<div class="ptz-pad-axis ptz-pad-axis-bottom">tilt -</div>
+		<div class="ptz-pad-axis ptz-pad-axis-left">pan -</div>
+		<div class="ptz-pad-axis ptz-pad-axis-right">pan +</div>
+		<svg class="ptz-pad" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="PTZ nudge pad">
+			<g class="ptz-pad-outer">
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="10" d="M 39 39 A 86 86 0 0 1 161 39 L 139 61 A 55 55 0 0 0 61 61 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="10" d="M 161 39 A 86 86 0 0 1 161 161 L 139 139 A 55 55 0 0 0 139 61 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="-10" d="M 161 161 A 86 86 0 0 1 39 161 L 61 139 A 55 55 0 0 0 139 139 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="-10" d="M 39 161 A 86 86 0 0 1 39 39 L 61 61 A 55 55 0 0 0 61 139 Z"></path>
+			</g>
+			<g class="ptz-pad-inner">
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="1" d="M 61 61 A 55 55 0 0 1 139 61 L 121 79 A 30 30 0 0 0 79 79 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="1" d="M 139 61 A 55 55 0 0 1 139 139 L 121 121 A 30 30 0 0 0 121 79 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="tilt" data-delta="-1" d="M 139 139 A 55 55 0 0 1 61 139 L 79 121 A 30 30 0 0 0 121 121 Z"></path>
+				<path class="ptz-pad-wedge" data-axis="pan" data-delta="-1" d="M 61 139 A 55 55 0 0 1 61 61 L 79 79 A 30 30 0 0 0 79 121 Z"></path>
+			</g>
+			<circle class="ptz-pad-home" data-action="center" cx="100" cy="100" r="30"></circle>
+			<text class="ptz-pad-label" x="100" y="32" text-anchor="middle">+10</text>
+			<text class="ptz-pad-label" x="100" y="58" text-anchor="middle">+1</text>
+			<text class="ptz-pad-label" x="100" y="151" text-anchor="middle">-1</text>
+			<text class="ptz-pad-label" x="100" y="177" text-anchor="middle">-10</text>
+			<text class="ptz-pad-label" x="172" y="104" text-anchor="middle">+10</text>
+			<text class="ptz-pad-label" x="146" y="104" text-anchor="middle">+1</text>
+			<text class="ptz-pad-label" x="54" y="104" text-anchor="middle">-1</text>
+			<text class="ptz-pad-label" x="28" y="104" text-anchor="middle">-10</text>
+			<path class="ptz-pad-home-icon" d="M 100 86 L 86 100 L 86 114 L 96 114 L 96 106 L 104 106 L 104 114 L 114 114 L 114 100 Z"></path>
+		</svg>
+	</div>
+}
+
 templ ptzSlider(label, axis string, min, max, value int, unit string) {
 	<div class="slider-row" id={ "ptz-" + axis }>
 		<span class="slider-label">{ label }</span>
@@ -228,6 +261,7 @@ templ statusPanel(s webStatus) {
 				@ptzSlider("Pan", "pan", s.PanLo, s.PanHi, s.Pan, "&#176;")
 				@ptzSlider("Tilt", "tilt", s.TiltLo, s.TiltHi, s.Tilt, "&#176;")
 				@ptzSlider("Zoom", "zoom", s.ZoomLo, s.ZoomHi, s.Zoom, "x")
+				@ptzPad()
 				<div class="spacer"></div>
 				<div class="btn-group">
 					<button class="btn" hx-post="/api/center" hx-target="#status-panel" aria-label="Center camera">Center<span class="kbd">C</span></button>
