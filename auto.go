@@ -20,6 +20,8 @@ func (d *Daemon) handleCallStart(
 	d.state.InCall = true
 	d.mu.Unlock()
 
+	d.publishState()
+
 	var errs []error
 
 	log := slog.With("auto_mode", autoMode)
@@ -60,6 +62,8 @@ func (d *Daemon) handleCallEnd(ctx context.Context, autoMode pixy.AutoMode) {
 	d.state.InCall = false
 	d.mu.Unlock()
 
+	d.publishState()
+
 	var autoErr error
 
 	log := slog.With("auto_mode", autoMode)
@@ -95,6 +99,10 @@ func (d *Daemon) autoManage(ctx context.Context) {
 		d.applyProbeResult(probeDevices()) //nolint:contextcheck
 		videoDev = d.videoDev
 		d.mu.Unlock()
+
+		if videoDev != "" {
+			d.publishState()
+		}
 
 		if videoDev == "" {
 			return

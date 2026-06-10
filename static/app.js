@@ -197,6 +197,53 @@
     }
   });
 
+  // SSE: replace 3s panel polling with push from the daemon. The server
+  // sends an initial state snapshot on connect plus one event whenever
+  // state, PTZ, or online transitions actually change. We debounce
+  // refresh triggers so a burst of mutations (e.g. centerCamera writes
+  // three v4l2 controls) only nudges /panel once. The 30s safety poll
+  // in templates.templ stays as a fallback if SSE never connects.
+  (function () {
+    if (!window.EventSource) return;
+    var es = null;
+    var retryDelay = 1000;
+    var maxRetryDelay = 30000;
+    var refreshDebounceTimer = null;
+
+    function scheduleRefresh() {
+      if (refreshDebounceTimer) return;
+      refreshDebounceTimer = setTimeout(function () {
+        refreshDebounceTimer = null;
+        if (document.visibilityState === "visible") {
+          htmx.trigger(document.body, "refresh");
+        }
+      }, 50);
+    }
+
+    function connect() {
+      try {
+        es = new EventSource("/api/events");
+      } catch (err) {
+        return;
+      }
+      es.addEventListener("state", scheduleRefresh);
+      es.addEventListener("ptz", scheduleRefresh);
+      es.addEventListener("online", scheduleRefresh);
+      es.onopen = function () {
+        retryDelay = 1000;
+      };
+      es.onerror = function () {
+        if (es) {
+          es.close();
+          es = null;
+        }
+        setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, maxRetryDelay);
+      };
+    }
+    connect();
+  })();
+
   document.addEventListener("keydown", function (e) {
     if (
       e.target.tagName === "INPUT" ||

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/LarsArtmann/emeet-pixyd/internal/events"
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/larsartmann/httputil"
@@ -57,6 +59,11 @@ type Daemon struct {
 
 	streamSema chan struct{}
 
+	// events fans state/PTZ/online changes out to connected SSE
+	// clients. nil when the broadcaster failed to initialize; all
+	// publish helpers check before use so the daemon still runs.
+	events *events.Broadcaster
+
 	deps Dependencies
 }
 
@@ -83,6 +90,7 @@ func NewDaemon(cfg pixy.Config) (*Daemon, error) {
 		config:     cfg,
 		state:      pixy.DefaultState(),
 		streamSema: make(chan struct{}, 1),
+		events:     events.New(),
 	}
 	//nolint:exhaustruct // remaining deps set below (circular ref on d.setTracking etc)
 	d.deps = Dependencies{
@@ -108,6 +116,71 @@ func NewDaemon(cfg pixy.Config) (*Daemon, error) {
 	checkExternalDeps()
 
 	return d, nil
+}
+
+// publishState captures the current state under RLock, marshals it,
+// and fans out a TypeState event. Must NOT be called while holding
+// d.mu. No-op when the broadcaster failed to initialize (events == nil).
+func (d *Daemon) publishState() {
+	if d.events == nil {
+		return
+	}
+	d.mu.RLock()
+	snapshot := struct {
+		Camera     pixy.CameraState `json:"camera"`
+		Audio      pixy.AudioMode   `json:"audio"`
+		Gesture    bool             `json:"gesture"`
+		Auto       pixy.AutoMode    `json:"auto"`
+		InCall     bool             `json:"inCall"`
+		Online     bool             `json:"online"`
+		Device     string           `json:"device"`
+		LastSynced time.Time        `json:"lastSynced"`
+	}{
+		Camera:     d.state.Camera,
+		Audio:      d.state.Audio,
+		Gesture:    d.state.Gesture,
+		Auto:       d.state.AutoMode,
+		InCall:     d.state.InCall,
+		Online:     d.videoDev != "",
+		Device:     d.videoDev,
+		LastSynced: d.lastSyncedAt,
+	}
+	d.mu.RUnlock()
+
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		slog.Debug("publishState marshal", "error", err)
+
+		return
+	}
+	d.events.Publish(events.Event{Type: events.TypeState, Body: body})
+}
+
+// publishPTZ fans out a TypePTZ event. The body is empty by design;
+// clients re-fetch /panel which already serves fresh PTZ values via
+// the cache.
+func (d *Daemon) publishPTZ() {
+	if d.events == nil {
+		return
+	}
+	d.events.Publish(events.Event{Type: events.TypePTZ, Body: []byte(`{}`)})
+}
+
+// publishOnline fans out a TypeOnline event indicating online/offline
+// transitions. Caller must NOT hold d.mu.
+func (d *Daemon) publishOnline(online bool) {
+	if d.events == nil {
+		return
+	}
+	body, err := json.Marshal(struct {
+		Online bool `json:"online"`
+	}{Online: online})
+	if err != nil {
+		slog.Debug("publishOnline marshal", "error", err)
+
+		return
+	}
+	d.events.Publish(events.Event{Type: events.TypeOnline, Body: body})
 }
 
 func checkExternalDeps() {
@@ -280,6 +353,11 @@ func (d *Daemon) eventLoop(
 			d.applyProbeResult(probeDevices()) //nolint:contextcheck
 			newVideo := d.videoDev
 			d.mu.Unlock()
+
+			if oldVideo != newVideo {
+				d.publishOnline(newVideo != "")
+				d.publishState()
+			}
 
 			if oldVideo == "" && newVideo != "" {
 				slog.Info("device appeared, syncing state")

@@ -7,12 +7,14 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"strconv"
 	"time"
 
+	"github.com/LarsArtmann/emeet-pixyd/internal/events"
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 	"github.com/a-h/templ"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -172,6 +174,100 @@ type healthResponse struct {
 	Version string           `json:"version"`
 }
 
+func (s *webServer) snapshotEventBody() []byte {
+	status := s.getWebStatus()
+	body, err := json.Marshal(struct {
+		Camera     string `json:"camera"`
+		Audio      string `json:"audio"`
+		Gesture    bool   `json:"gesture"`
+		Auto       string `json:"auto"`
+		InCall     bool   `json:"inCall"`
+		Online     bool   `json:"online"`
+		Device     string `json:"device"`
+		LastSynced string `json:"lastSynced"`
+	}{
+		Camera:     string(status.Camera),
+		Audio:      string(status.Audio),
+		Gesture:    status.Gesture,
+		Auto:       status.Auto.String(),
+		InCall:     status.InCall,
+		Online:     status.Online,
+		Device:     status.Device,
+		LastSynced: status.LastSynced,
+	})
+	if err != nil {
+		slog.Debug("snapshotEventBody marshal", "error", err)
+
+		return []byte("{}")
+	}
+
+	return body
+}
+
+func writeSSEFrame(w http.ResponseWriter, eventType events.Type, body []byte) error {
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, body); err != nil {
+		return fmt.Errorf("write sse: %w", err)
+	}
+
+	return nil
+}
+
+// sseHeartbeatInterval is the cadence at which the SSE handler emits a
+// keepalive comment so intermediate proxies do not close idle
+// connections. 20s is well under the common 30/60s idle timeout
+// without adding noticeable byte traffic.
+const sseHeartbeatInterval = 20 * time.Second
+
+func (s *webServer) handleEvents(responseWriter http.ResponseWriter, request *http.Request) {
+	flusher, ok := responseWriter.(http.Flusher)
+	if !ok {
+		http.Error(responseWriter, "streaming not supported", http.StatusInternalServerError)
+
+		return
+	}
+
+	rc := http.NewResponseController(responseWriter)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		slog.Warn("could not clear write deadline; SSE may be cut off by server timeout", "error", err)
+	}
+
+	responseWriter.Header().Set("Content-Type", "text/event-stream")
+	responseWriter.Header().Set("Cache-Control", "no-store")
+	responseWriter.Header().Set("Connection", "keep-alive")
+	responseWriter.Header().Set("X-Accel-Buffering", "no")
+
+	if err := writeSSEFrame(responseWriter, events.TypeState, s.snapshotEventBody()); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	sub, unsub := s.daemon.events.Subscribe()
+	defer unsub()
+
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-request.Context().Done():
+			return
+		case ev, open := <-sub:
+			if !open {
+				return
+			}
+			if err := writeSSEFrame(responseWriter, ev.Type, ev.Body); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(responseWriter, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 func (s *webServer) handleStatusPanel(responseWriter http.ResponseWriter, request *http.Request) {
 	status := s.getWebStatusWithPTZ(request.Context())
 	templ.Handler(statusPanel(status)).ServeHTTP(responseWriter, request) //nolint:contextcheck
@@ -320,6 +416,7 @@ func newWebMux(server *webServer) *http.ServeMux {
 	})
 	mux.HandleFunc("GET /api/snapshot", server.handleSnapshot)
 	mux.HandleFunc("GET /api/stream", server.handleStream)
+	mux.HandleFunc("GET /api/events", server.handleEvents)
 	mux.Handle("GET /metrics", promhttp.Handler())
 
 	if server.daemon.config.Debug {

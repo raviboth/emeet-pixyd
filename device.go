@@ -68,6 +68,8 @@ func (d *Daemon) setDeviceState(
 	d.saveStateOrLog("failed to save state")
 	d.mu.Unlock()
 
+	d.publishState()
+
 	return nil
 }
 
@@ -142,6 +144,8 @@ func (d *Daemon) centerCamera(ctx context.Context) error {
 			return fmt.Errorf("centerCamera %s=%s: %w", ctrl, val, err)
 		}
 	}
+
+	d.publishPTZ()
 
 	return nil
 }
@@ -248,6 +252,8 @@ func (d *Daemon) syncState(ctx context.Context) CommandResult {
 	if changed {
 		d.saveStateOrLog("failed to save synced state")
 		d.mu.Unlock()
+
+		d.publishState()
 
 		return okResult("synced (state updated from camera)")
 	}
