@@ -73,12 +73,12 @@ templ previewSection(s webStatus) {
 				} else if s.Camera == pixy.StatePrivacy {
 					<div class="preview-placeholder" data-reason="privacy">
 						<div class="icon">&#x1F576;</div>
-						<div>Privacy mode &mdash; lens covered</div>
+						<div>Privacy mode: lens covered</div>
 					</div>
 				} else if s.PreviewPaused {
 					<div class="preview-placeholder" data-reason="paused">
 						<div class="icon">&#x23F8;</div>
-						<div>Preview paused &mdash; device free for other apps</div>
+						<div>Preview paused: device free for other apps</div>
 					</div>
 				} else {
 					<div class="preview-live-dot"></div>
@@ -133,6 +133,7 @@ templ ptzSlider(label, axis string, min, max, value int, unit string) {
 			type="range"
 			class="ptz-slider"
 			id={ "slider-" + axis }
+			name="value"
 			min={ fmt.Sprintf("%d", min) }
 			max={ fmt.Sprintf("%d", max) }
 			value={ fmt.Sprintf("%d", value) }
@@ -258,8 +259,8 @@ templ statusPanel(s webStatus) {
 		if s.Online {
 			<div class="card">
 				<div class="card-title">PTZ</div>
-				@ptzSlider("Pan", "pan", s.PanLo, s.PanHi, s.Pan, "&#176;")
-				@ptzSlider("Tilt", "tilt", s.TiltLo, s.TiltHi, s.Tilt, "&#176;")
+				@ptzSlider("Pan", "pan", s.PanLo, s.PanHi, s.Pan, "°")
+				@ptzSlider("Tilt", "tilt", s.TiltLo, s.TiltHi, s.Tilt, "°")
 				@ptzSlider("Zoom", "zoom", s.ZoomLo, s.ZoomHi, s.Zoom, "x")
 				@ptzPad()
 				<div class="spacer"></div>
