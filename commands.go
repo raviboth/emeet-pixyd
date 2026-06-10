@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -168,11 +169,21 @@ func (d *Daemon) handleTogglePrivacy(ctx context.Context) CommandResult {
 	return d.handleTrackingCommand(ctx, pixy.StatePrivacy, cmdTogglePrivacy)
 }
 
+// manualAutoSuppressWindow is how long autoManage skips after a manual
+// tracking command. 15s covers the worst-case call-detect debounce
+// (3 polls * PollInterval default 2s = 6s) plus enough buffer that a
+// human seeing the UI update has time to commit to the next action.
+const manualAutoSuppressWindow = 15 * time.Second
+
 func (d *Daemon) handleTrackingCommand(
 	ctx context.Context,
 	state pixy.CameraState,
 	label string,
 ) CommandResult {
+	d.mu.Lock()
+	d.autoSuppressedUntil = time.Now().Add(manualAutoSuppressWindow)
+	d.mu.Unlock()
+
 	err := d.deps.setTracking(ctx, state)
 	if err != nil {
 		return errResult(label+" "+string(state), err)

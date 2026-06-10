@@ -57,6 +57,14 @@ type Daemon struct {
 		values pixy.PTZLimits
 	}
 
+	// autoSuppressedUntil is the deadline before which autoManage
+	// skips its work. Set by handleTrackingCommand whenever the user
+	// (or a tray / CLI) overrides camera state manually so an
+	// in-flight call detection does not slam the camera back to a
+	// different state half a second after the click. Zero value
+	// means no suppression. Guarded by mu.
+	autoSuppressedUntil time.Time
+
 	// previewPaused is the user-asserted "release /dev/videoN" flag.
 	// When true, the previewSection renders a paused placeholder and
 	// /api/stream returns 503 so another app (e.g. a browser tab

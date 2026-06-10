@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/LarsArtmann/emeet-pixyd/internal/pixy"
 )
@@ -88,6 +89,18 @@ func (d *Daemon) handleCallEnd(ctx context.Context, autoMode pixy.AutoMode) {
 func (d *Daemon) autoManage(ctx context.Context) {
 	d.cmdMu.Lock()
 	defer d.cmdMu.Unlock()
+
+	// Honor manual override: if the user pressed Track / Idle / Privacy
+	// within the suppression window, skip auto-manage so the call-detect
+	// ticker does not slam state back a few hundred ms after the
+	// click. The window is bounded so a forgotten manual override does
+	// not freeze auto-mode forever.
+	d.mu.RLock()
+	suppressedUntil := d.autoSuppressedUntil
+	d.mu.RUnlock()
+	if time.Now().Before(suppressedUntil) {
+		return
+	}
 
 	d.mu.RLock()
 	videoDev := d.videoDev
