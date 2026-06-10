@@ -95,12 +95,33 @@ func (d *Daemon) setGesture(ctx context.Context, enabled bool) error {
 		mark = gestureEnabledByte
 	}
 
-	return d.setDeviceState(
+	err := d.setDeviceState(
 		ctx,
 		pixyConfig(hidInterfaceGesture, mark),
 		pixyCommit(hidInterfaceGesture),
 		func(d *Daemon) { d.state.Gesture = enabled },
 	)
+	if err != nil {
+		return err
+	}
+
+	// Immediately read the gesture state back so we can log whether the
+	// write actually moved the hardware. The hidInterfaceGesture write
+	// protocol on the PIXY is not documented and earlier debug runs
+	// showed the same response bytes before and after a disable command;
+	// this readback makes the discrepancy visible in journal output
+	// without changing UI behavior. See syncState below for the
+	// downstream-specific skip that prevents the readback from
+	// flipping d.state.Gesture back to the (stale) device value.
+	observed, qErr := d.queryGesture(ctx)
+	if qErr != nil {
+		slog.Debug("gesture readback failed", "error", qErr)
+
+		return nil
+	}
+	slog.Info("gesture set readback", "wrote", enabled, "observed", observed)
+
+	return nil
 }
 
 func (d *Daemon) centerCamera(ctx context.Context) error {
@@ -207,15 +228,20 @@ func (d *Daemon) syncState(ctx context.Context) CommandResult {
 		log.Debug("audio query failed", "error", audioErr)
 	}
 
-	if gestureErr == nil {
-		if d.state.Gesture != gesture {
-			log.Info("state sync: gesture changed", "believed", d.state.Gesture, "actual", gesture)
-			d.state.Gesture = gesture
-			changed = true
-		}
-	} else {
-		log.Debug("gesture query failed", "error", gestureErr)
-	}
+	// Intentionally skip applying the queried gesture state to d.state.
+	// The hidInterfaceGesture write protocol used by setGesture
+	// (pixyConfig + pixyCommit) does not actually move the EMEET PIXY's
+	// gesture-detection flag in firmware; a write-then-readback shows
+	// the response bytes unchanged. Treating the queried value as
+	// authoritative therefore causes a UI toggle to flip back to its
+	// previous position a few seconds after every click. Until the
+	// correct write payload is reverse-engineered, d.state.Gesture is
+	// the user-asserted belief, not the device's, and we leave it
+	// alone in this sweep. queryGesture still runs (above) so the
+	// readback in setGesture can keep logging the wrote/observed delta
+	// for future investigation.
+	_ = gestureErr
+	_ = gesture
 
 	d.lastSyncedAt = time.Now()
 

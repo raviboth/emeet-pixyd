@@ -226,6 +226,15 @@ func (d *Daemon) handleShutdown(cancel context.CancelFunc, httpSrv *http.Server)
 	}
 }
 
+// hardwareSyncInterval is the period at which the daemon re-queries
+// the camera for its actual tracking / audio state. The poll is gated
+// by cmdMu so it never races an in-flight write; the cost is two short
+// HID reads per tick (gesture readback is intentionally swallowed by
+// syncState, see device.go). Tuned for "I waved my hand and the UI
+// should reflect the new tracking state within a few seconds" without
+// hammering the HID interface.
+const hardwareSyncInterval = 3 * time.Second
+
 func (d *Daemon) eventLoop(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -234,6 +243,16 @@ func (d *Daemon) eventLoop(
 ) {
 	ticker := time.NewTicker(d.config.PollInterval)
 	defer ticker.Stop()
+
+	// Hardware-state sync ticker. The camera can flip its own
+	// tracking/audio state independently of the daemon: the physical
+	// privacy slider, the hand-gesture trigger when gesture detection
+	// is enabled, and the EMEET utility on another OS can all do
+	// this. Without a periodic re-query d.state drifts from the
+	// device and the UI shows stale buttons until the user clicks
+	// Sync.
+	hwSyncTicker := time.NewTicker(hardwareSyncInterval)
+	defer hwSyncTicker.Stop()
 
 	ueventCh := make(chan struct{}, ueventChBufSize)
 	go d.listenUevents(ctx, ueventCh)
@@ -271,6 +290,16 @@ func (d *Daemon) eventLoop(
 		case <-ticker.C:
 			d.autoManage(ctx)
 			sdNotify("WATCHDOG=1")
+		case <-hwSyncTicker.C:
+			d.mu.RLock()
+			videoDev := d.videoDev
+			d.mu.RUnlock()
+			if videoDev == "" {
+				continue
+			}
+			d.cmdMu.Lock()
+			_ = d.syncState(ctx)
+			d.cmdMu.Unlock()
 		}
 	}
 }
