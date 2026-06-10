@@ -2,7 +2,14 @@
   "use strict";
 
   var HTMX_TIMEOUT_MS = 10000;
-  var STREAM_RETRY_INITIAL_MS = 3000;
+  // STREAM_RETRY_INITIAL_MS was 3000ms upstream, which produced a
+  // 3-second black-screen window every time PTZ cycled the preview
+  // and the new stream request landed just before the daemon released
+  // the stream semaphore. With the local: stream sema wait patch the
+  // 503 race is mostly gone, but the retry path can still fire on
+  // page load / tab unhide. 500ms gives a quick recovery without
+  // hammering the daemon on a genuinely-stuck stream.
+  var STREAM_RETRY_INITIAL_MS = 500;
   var STREAM_RETRY_MAX_MS = 30000;
   var TOAST_DISPLAY_MS = 2500;
   var TOAST_FADE_MS = 300;

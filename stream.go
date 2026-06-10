@@ -94,15 +94,29 @@ func cleanupFFmpeg(cmd *exec.Cmd) {
 	}
 }
 
+// streamSemaWait bounds how long handleStream waits for the previous
+// request's ffmpeg cleanup to release the stream semaphore. Without the
+// wait, a reconnect that races the previous handler's cleanup lands on
+// 503 within microseconds, the browser fires img.onerror, and the user
+// sees a black preview until the exponential backoff retry fires
+// seconds later. The common trigger is the local: reload preview after
+// PTZ patch, which intentionally cycles the stream after every framing
+// change. Beyond the timeout we still return 503 so a genuinely-stuck
+// slot does not block the request indefinitely.
+const streamSemaWait = time.Second
+
 func (s *webServer) handleStream(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) {
 	ctx := request.Context()
 
+	semaCtx, semaCancel := context.WithTimeout(ctx, streamSemaWait)
 	select {
 	case s.daemon.streamSema <- struct{}{}:
-	default:
+		semaCancel()
+	case <-semaCtx.Done():
+		semaCancel()
 		http.Error(responseWriter, "stream already in use", http.StatusServiceUnavailable)
 
 		return
