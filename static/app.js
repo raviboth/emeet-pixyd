@@ -141,7 +141,35 @@
     var okAxis = getPTZAxis(path);
     var okSlider = getSlider(okAxis);
     if (okSlider) okSlider.dataset.lastGood = okSlider.value;
+
+    // Force the preview to drop its buffered frames after any framing change.
+    // ffmpeg + the multipart parser queue a second or two of frames, so PTZ
+    // changes otherwise appear stuck at the old position until the queue
+    // drains. Reloading the <img> src starts a fresh stream with empty
+    // buffers; the new ffmpeg child sees the camera at the new position.
+    if (pathAffectsFraming(path)) {
+      reloadPreview();
+    }
   });
+
+  function pathAffectsFraming(p) {
+    if (!p) return false;
+    if (p.indexOf("/api/ptz/") === 0) return true;
+    return p === "/api/center";
+  }
+
+  function reloadPreview() {
+    var img = document.getElementById("preview-img");
+    if (!img) return;
+    // Clear src first so the browser cancels the in-flight stream cleanly.
+    // The daemon's stream semaphore is size 1; without this gap a new
+    // request can race the old one and get a 503 "stream already in use",
+    // which then falls into the slow exponential-backoff retry path.
+    img.src = "";
+    setTimeout(function () {
+      img.src = "/api/stream?" + Date.now();
+    }, 150);
+  }
 
   document.addEventListener("htmx:responseError", function (e) {
     var panel = document.getElementById("status-panel");
