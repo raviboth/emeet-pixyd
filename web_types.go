@@ -20,16 +20,17 @@ type webStatus struct {
 	ZoomLo int
 	ZoomHi int
 
-	Camera     pixy.CameraState
-	Audio      pixy.AudioMode
-	Gesture    bool
-	InCall     bool
-	Auto       pixy.AutoMode
-	Online     bool
-	Device     string
-	Error      string
-	LastSynced string
-	Toast      string
-	ToastType  string
-	Version    string
+	Camera        pixy.CameraState
+	Audio         pixy.AudioMode
+	Gesture       bool
+	InCall        bool
+	Auto          pixy.AutoMode
+	Online        bool
+	PreviewPaused bool
+	Device        string
+	Error         string
+	LastSynced    string
+	Toast         string
+	ToastType     string
+	Version       string
 }

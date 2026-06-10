@@ -91,17 +91,18 @@ func (s *webServer) getWebStatus() webStatus {
 	defer s.daemon.mu.RUnlock()
 	//nolint:exhaustruct
 	status := webStatus{
-		PTZValues:  pixy.PTZValues{},
-		Camera:     s.daemon.state.Camera,
-		Audio:      s.daemon.state.Audio,
-		Gesture:    s.daemon.state.Gesture,
-		InCall:     s.daemon.state.InCall,
-		Auto:       s.daemon.state.AutoMode,
-		Online:     s.daemon.videoDev != "",
-		Device:     s.daemon.videoDev,
-		Error:      errStr(s.daemon.autoError),
-		LastSynced: formatLastSynced(s.daemon.lastSyncedAt),
-		Version:    buildVersion,
+		PTZValues:     pixy.PTZValues{},
+		Camera:        s.daemon.state.Camera,
+		Audio:         s.daemon.state.Audio,
+		Gesture:       s.daemon.state.Gesture,
+		InCall:        s.daemon.state.InCall,
+		Auto:          s.daemon.state.AutoMode,
+		Online:        s.daemon.videoDev != "",
+		PreviewPaused: s.daemon.previewPaused,
+		Device:        s.daemon.videoDev,
+		Error:         errStr(s.daemon.autoError),
+		LastSynced:    formatLastSynced(s.daemon.lastSyncedAt),
+		Version:       buildVersion,
 	}
 	if status.Online {
 		status.Zoom = pixy.ZoomDefault
@@ -270,6 +271,24 @@ func (s *webServer) handleEvents(responseWriter http.ResponseWriter, request *ht
 	}
 }
 
+func (s *webServer) handlePreviewSection(responseWriter http.ResponseWriter, request *http.Request) {
+	status := s.getWebStatus()
+	templ.Handler(previewSection(status)).ServeHTTP(responseWriter, request)
+}
+
+func (s *webServer) handlePreviewToggle(responseWriter http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(responseWriter, request.Body, maxBodyBytes)
+
+	s.daemon.mu.Lock()
+	s.daemon.previewPaused = !s.daemon.previewPaused
+	paused := s.daemon.previewPaused
+	s.daemon.mu.Unlock()
+
+	slog.Debug("preview toggled", "paused", paused)
+
+	s.handlePreviewSection(responseWriter, request)
+}
+
 func (s *webServer) handleStatusPanel(responseWriter http.ResponseWriter, request *http.Request) {
 	status := s.getWebStatusWithPTZ(request.Context())
 	templ.Handler(statusPanel(status)).ServeHTTP(responseWriter, request) //nolint:contextcheck
@@ -401,6 +420,17 @@ func (s *webServer) checkDevice(responseWriter http.ResponseWriter) (webStatus, 
 		return status, false
 	}
 
+	// Privacy mode physically closes the lens; serving the stream
+	// just bakes the captured-pre-privacy frame buffer or freezes
+	// black, neither useful. Preview Pause is the user's explicit
+	// "let another app have the camera" signal. Both refuse the
+	// stream with 503 so the client's onerror path kicks in cleanly.
+	if status.Camera == pixy.StatePrivacy || status.PreviewPaused {
+		http.Error(responseWriter, "preview unavailable", http.StatusServiceUnavailable)
+
+		return status, false
+	}
+
 	return status, true
 }
 
@@ -409,6 +439,8 @@ func newWebMux(server *webServer) *http.ServeMux {
 	mux.Handle("GET /static/", cachingFS{handler: http.FileServer(http.FS(staticFS))})
 	mux.HandleFunc("GET /{$}", server.handleIndex)
 	mux.HandleFunc("GET /panel", server.handleStatusPanel)
+	mux.HandleFunc("GET /preview", server.handlePreviewSection)
+	mux.HandleFunc("POST /api/preview/toggle", server.handlePreviewToggle)
 	mux.HandleFunc("GET /api/health", server.handleHealth)
 	mux.HandleFunc("POST /api/track", server.action(cmdTrack))
 	mux.HandleFunc("POST /api/"+cmdIdle, server.action(cmdIdle))

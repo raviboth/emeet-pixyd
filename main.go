@@ -57,6 +57,13 @@ type Daemon struct {
 		values pixy.PTZLimits
 	}
 
+	// previewPaused is the user-asserted "release /dev/videoN" flag.
+	// When true, the previewSection renders a paused placeholder and
+	// /api/stream returns 503 so another app (e.g. a browser tab
+	// using getUserMedia, or a meeting client) can grab the device.
+	// Guarded by mu.
+	previewPaused bool
+
 	streamSema chan struct{}
 
 	// events fans state/PTZ/online changes out to connected SSE

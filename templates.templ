@@ -29,24 +29,7 @@ templ page(s webStatus) {
 				</header>
 				<div class="grid">
 					<div>
-						<div class="card">
-							<div class="card-title">Preview</div>
-							<div class="preview-container" id="preview">
-								if s.Online && s.Device != "" {
-									<div class="preview-live-dot"></div>
-									<img src="/api/stream" id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
-									<div id="preview-fallback" class="preview-placeholder" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column">
-										<div class="icon">&#x1F4F7;</div>
-										<div>Camera in use or unavailable</div>
-									</div>
-								} else {
-									<div class="preview-placeholder">
-										<div class="icon">&#x1F4F7;</div>
-										<div>Camera offline</div>
-									</div>
-								}
-							</div>
-						</div>
+						@previewSection(s)
 					</div>
 					@statusPanel(s)
 				</div>
@@ -56,6 +39,58 @@ templ page(s webStatus) {
 			<script src={ fmt.Sprintf("/static/app.js?v=%s", s.Version) }></script>
 		</body>
 	</html>
+}
+
+templ previewSection(s webStatus) {
+	<div id="preview-section" hx-get="/preview" hx-trigger="pixy:previewRefresh from:body" hx-swap="outerHTML">
+		<div class="card">
+			<div class="card-title-row">
+				<div class="card-title">Preview</div>
+				if s.Online && s.Device != "" {
+					<button
+						class={ "btn btn-mini", templ.KV("btn-active", s.PreviewPaused) }
+						hx-post="/api/preview/toggle"
+						hx-target="#preview-section"
+						hx-swap="outerHTML"
+						aria-label="Toggle preview pause"
+					>
+						if s.PreviewPaused {
+							<svg class="btn-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2 L10 6 L3 10 Z" fill="currentColor"></path></svg>
+							<span>Resume</span>
+						} else {
+							<svg class="btn-icon" viewBox="0 0 12 12" aria-hidden="true"><rect x="3" y="2" width="2.5" height="8" fill="currentColor"></rect><rect x="6.5" y="2" width="2.5" height="8" fill="currentColor"></rect></svg>
+							<span>Pause</span>
+						}
+					</button>
+				}
+			</div>
+			<div class="preview-container" id="preview">
+				if !s.Online || s.Device == "" {
+					<div class="preview-placeholder">
+						<div class="icon">&#x1F4F7;</div>
+						<div>Camera offline</div>
+					</div>
+				} else if s.Camera == pixy.StatePrivacy {
+					<div class="preview-placeholder" data-reason="privacy">
+						<div class="icon">&#x1F576;</div>
+						<div>Privacy mode &mdash; lens covered</div>
+					</div>
+				} else if s.PreviewPaused {
+					<div class="preview-placeholder" data-reason="paused">
+						<div class="icon">&#x23F8;</div>
+						<div>Preview paused &mdash; device free for other apps</div>
+					</div>
+				} else {
+					<div class="preview-live-dot"></div>
+					<img src="/api/stream" id="preview-img" alt="Live camera feed" aria-label="Live camera preview"/>
+					<div id="preview-fallback" class="preview-placeholder" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column">
+						<div class="icon">&#x1F4F7;</div>
+						<div>Camera in use or unavailable</div>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
 }
 
 templ ptzSlider(label, axis string, min, max, value int, unit string) {
