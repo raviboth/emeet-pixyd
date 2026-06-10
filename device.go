@@ -136,7 +136,6 @@ func (d *Daemon) centerCamera(ctx context.Context) error {
 	controls := map[string]string{
 		ptzAxes[pixy.AxisPan].V4L2Ctrl:  "0",
 		ptzAxes[pixy.AxisTilt].V4L2Ctrl: "0",
-		ptzAxes[pixy.AxisZoom].V4L2Ctrl: strconv.Itoa(pixy.ZoomDefault),
 	}
 	for ctrl, val := range controls {
 		err := d.deps.v4l2Set(ctx, videoDev, ctrl, val)
@@ -150,13 +149,10 @@ func (d *Daemon) centerCamera(ctx context.Context) error {
 	return nil
 }
 
-// resetCamera zeros all three PTZ axes: pan/tilt to 0 and zoom to its
-// minimum. centerCamera preserves the current zoom by writing
-// pixy.ZoomDefault (which is the same as zoom min on PIXY hardware,
-// but semantically different - "centered framing"). resetCamera is
-// "factory zero everything" so a confused user has a one-button
-// recovery to a known-good PTZ position regardless of what state the
-// camera was in.
+// resetCamera zeros all three PTZ axes: pan=0, tilt=0, zoom=ZoomMin.
+// Pairs with centerCamera which preserves the user's zoom; reset is
+// the explicit "factory zero everything" recovery for when the user
+// is confused about the camera's current state.
 func (d *Daemon) resetCamera(ctx context.Context) error {
 	videoDev := d.videoDevice()
 
