@@ -194,7 +194,10 @@ templ statusPanel(s webStatus) {
 				@ptzSlider("Tilt", "tilt", s.TiltLo, s.TiltHi, s.Tilt, "&#176;")
 				@ptzSlider("Zoom", "zoom", s.ZoomLo, s.ZoomHi, s.Zoom, "x")
 				<div class="spacer"></div>
-				<button class="btn" hx-post="/api/center" hx-target="#status-panel" aria-label="Center camera">Center<span class="kbd">C</span></button>
+				<div class="btn-group">
+					<button class="btn" hx-post="/api/center" hx-target="#status-panel" aria-label="Center camera">Center<span class="kbd">C</span></button>
+					<button class="btn" hx-post="/api/reset" hx-target="#status-panel" aria-label="Reset PTZ to factory zero">Reset</button>
+				</div>
 			</div>
 		}
 		<div class="card">

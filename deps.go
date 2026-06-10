@@ -19,6 +19,7 @@ type Dependencies struct {
 	setAudio      func(ctx context.Context, mode pixy.AudioMode) error
 	setGesture    func(ctx context.Context, enabled bool) error
 	centerCamera  func(ctx context.Context) error
+	resetCamera   func(ctx context.Context) error
 	v4l2Set       func(ctx context.Context, dev, ctrl, val string) error
 	parsePTZ      func(ctx context.Context, dev string) pixy.PTZValues
 }

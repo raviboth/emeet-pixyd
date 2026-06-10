@@ -103,6 +103,7 @@ func NewDaemon(cfg pixy.Config) (*Daemon, error) {
 	d.deps.setAudio = d.setAudio
 	d.deps.setGesture = d.setGesture
 	d.deps.centerCamera = d.centerCamera
+	d.deps.resetCamera = d.resetCamera
 	d.deps.v4l2Set = v4l2Set
 	d.deps.parsePTZ = parsePTZValues
 	// Config values override defaults before loading persisted state;

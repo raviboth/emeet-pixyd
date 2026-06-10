@@ -23,6 +23,7 @@ const (
 	respGestureOn      = "gesture on"
 	respGestureOff     = "gesture off"
 	respCentered       = "centered"
+	respReset          = "reset"
 
 	cmdStatus        = "status"
 	cmdGestureOn     = "gesture-on"
@@ -37,6 +38,7 @@ const (
 	cmdTrack         = "track"
 	cmdAudio         = "audio"
 	cmdCenter        = "center"
+	cmdReset         = "reset"
 	cmdAuto          = "auto"
 	cmdVersion       = "version"
 	cmdSync          = "sync"
@@ -94,6 +96,9 @@ func (d *Daemon) handleMutatingCommand(ctx context.Context, parts []string) Comm
 
 	case cmdCenter:
 		return d.handleCenterCommand(ctx)
+
+	case cmdReset:
+		return d.handleResetCommand(ctx)
 
 	case cmdAutoOn, cmdAutoOff, cmdToggleAuto, cmdAuto:
 		return d.handleAutoCommand(parts)
@@ -241,6 +246,15 @@ func (d *Daemon) handleCenterCommand(ctx context.Context) CommandResult {
 	}
 
 	return okResult(respCentered)
+}
+
+func (d *Daemon) handleResetCommand(ctx context.Context) CommandResult {
+	err := d.deps.resetCamera(ctx)
+	if err != nil {
+		return errResult(cmdReset, err)
+	}
+
+	return okResult(respReset)
 }
 
 func (d *Daemon) handleAutoCommand(parts []string) CommandResult {

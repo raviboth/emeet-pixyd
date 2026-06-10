@@ -36,6 +36,7 @@ const (
 	toastCameraIdle      = "Camera idle"
 	toastPrivacyOn       = "Privacy mode on"
 	toastCameraCentered  = "Camera centered"
+	toastCameraReset     = "Camera reset"
 	toastStateSynced     = "State synced"
 	toastProbedDevices   = "Probed devices"
 	toastAudioChanged    = "Audio mode changed"
@@ -54,6 +55,7 @@ var actionToasts = map[string]actionToastInfo{
 	cmdIdle:          {toastCameraIdle, toastTypeSuccess},
 	cmdPrivacy:       {toastPrivacyOn, toastTypeSuccess},
 	cmdCenter:        {toastCameraCentered, toastTypeSuccess},
+	cmdReset:         {toastCameraReset, toastTypeSuccess},
 	cmdSync:          {toastStateSynced, toastTypeSuccess},
 	cmdProbe:         {toastProbedDevices, toastTypeSuccess},
 	cmdToggleGesture: {toastGestureToggled, toastTypeInfo},
@@ -281,6 +283,14 @@ func (s *webServer) action(command string) http.HandlerFunc {
 
 		slog.Debug("web action", "cmd", command, "response", result.String())
 
+		// center / reset write directly to v4l2 controls. The
+		// PTZ cache reflects the position before the write, so
+		// the freshly-rendered panel would show stale sliders
+		// until the 2s TTL expired. Force a re-fetch.
+		if command == cmdCenter || command == cmdReset {
+			s.invalidatePTZCache()
+		}
+
 		status := s.getWebStatusWithPTZ(request.Context())
 		toast, toastType := actionToast(command)
 		applyResultToStatus(result, &status, toast, toastType)
@@ -408,6 +418,7 @@ func newWebMux(server *webServer) *http.ServeMux {
 	mux.HandleFunc("POST /api/gesture", server.action(cmdToggleGesture))
 	mux.HandleFunc("POST /api/auto", server.action(cmdToggleAuto))
 	mux.HandleFunc("POST /api/center", server.action(cmdCenter))
+	mux.HandleFunc("POST /api/reset", server.action(cmdReset))
 	mux.HandleFunc("POST /api/sync", server.action(cmdSync))
 	mux.HandleFunc("POST /api/probe", server.action(cmdProbe))
 	mux.HandleFunc("POST /api/ptz/{axis}", server.handlePTZ)
